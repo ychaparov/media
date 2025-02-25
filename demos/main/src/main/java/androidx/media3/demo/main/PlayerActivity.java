@@ -320,7 +320,9 @@ public class PlayerActivity extends AppCompatActivity
         .setDrmSessionManagerProvider(drmSessionManagerProvider)
         .setLocalAdInsertionComponents(
             this::getClientSideAdsLoader, /* adViewProvider= */ playerView)
-        .setServerSideAdInsertionMediaSourceFactory(imaServerSideAdInsertionMediaSourceFactory);
+        .setServerSideAdInsertionMediaSourceFactory(imaServerSideAdInsertionMediaSourceFactory)
+        .experimentalSetCodecsToParseWithinGopSampleDependencies(
+            C.VIDEO_CODEC_FLAG_H264 | C.VIDEO_CODEC_FLAG_H265);
   }
 
   @OptIn(markerClass = UnstableApi.class)
