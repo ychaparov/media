@@ -46,6 +46,7 @@ import android.os.IBinder;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.style.ForegroundColorSpan;
+import android.util.Pair;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
@@ -65,6 +66,8 @@ import androidx.media3.common.C;
 import androidx.media3.common.DebugViewProvider;
 import androidx.media3.common.Effect;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.OverlaySettings;
+import androidx.media3.common.VideoCompositorSettings;
 import androidx.media3.common.audio.AudioProcessor;
 import androidx.media3.common.audio.ChannelMixingAudioProcessor;
 import androidx.media3.common.audio.ChannelMixingMatrix;
@@ -72,6 +75,7 @@ import androidx.media3.common.audio.SonicAudioProcessor;
 import androidx.media3.common.util.BitmapLoader;
 import androidx.media3.common.util.Clock;
 import androidx.media3.common.util.Log;
+import androidx.media3.common.util.Size;
 import androidx.media3.common.util.Util;
 import androidx.media3.datasource.DataSourceBitmapLoader;
 import androidx.media3.effect.BitmapOverlay;
@@ -125,6 +129,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -473,12 +478,74 @@ public final class TransformerActivity extends AppCompatActivity {
       editedMediaItemSequenceBuilder.experimentalSetForceAudioTrack(
           bundle.getBoolean(ConfigurationActivity.FORCE_AUDIO_TRACK));
     }
+    // The primary sequence needs an explicit gap to get video to continue after the primary
+    // sequence ends. Not necessary for audio.
+    editedMediaItemSequenceBuilder.addGap(14_000_000);
+    EditedMediaItem.Builder bbb =
+        new EditedMediaItem.Builder(
+            MediaItem.fromUri(
+                    "https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4")
+                .buildUpon()
+                .setClippingConfiguration(
+                    new MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(4_000)
+                        .setEndPositionMs(24_000)
+                        .build())
+                .build())
+            .setEffects(
+                new Effects(
+                    ImmutableList.of(),
+                    ImmutableList.of(
+                        // The second item should be scaled to the first item dimensions.
+                        // Otherwise writing correct VideoCompositorSettings is harder - need to
+                        // compute scale in getOverlaySettings.
+                        Presentation.createForWidthAndHeight(
+                            /* width= */ 1280,
+                            /* height= */ 720,
+                            Presentation.LAYOUT_SCALE_TO_FIT))));
+    long secondStartUs = 6_000_000;
+    long firstDurationUs = 10_000_000;
+    EditedMediaItemSequence.Builder otherSequenceBuilder =
+        new EditedMediaItemSequence.Builder().addGap(secondStartUs).addItem(bbb.build());
+    otherSequenceBuilder.experimentalSetForceAudioTrack(true).experimentalSetForceVideoTrack(true);
     Composition.Builder compositionBuilder =
-        new Composition.Builder(editedMediaItemSequenceBuilder.build());
+        new Composition.Builder(
+            editedMediaItemSequenceBuilder.build(), otherSequenceBuilder.build());
+    compositionBuilder.setVideoCompositorSettings(
+        new VideoCompositorSettings() {
+          @Override
+          public Size getOutputSize(List<Size> inputSizes) {
+            return new Size(/* width= */ 1280, /* height= */ 720);
+          }
+
+          @Override
+          public OverlaySettings getOverlaySettings(int inputId, long presentationTimeUs) {
+            if (presentationTimeUs > secondStartUs && inputId == 0) {
+              return new ScaledOverlaySettings(
+                  1f
+                      - (float) (presentationTimeUs - secondStartUs)
+                      / (firstDurationUs - secondStartUs));
+            }
+            return new OverlaySettings() {};
+          }
+        });
     if (bundle != null) {
       compositionBuilder.setHdrMode(bundle.getInt(ConfigurationActivity.HDR_MODE));
     }
     return compositionBuilder.build();
+  }
+
+  private static final class ScaledOverlaySettings implements OverlaySettings {
+    final float scale;
+
+    public ScaledOverlaySettings(float scale) {
+      this.scale = scale;
+    }
+
+    @Override
+    public Pair<Float, Float> getScale() {
+      return Pair.create(scale, scale);
+    }
   }
 
   private ImmutableList<AudioProcessor> createAudioProcessorsFromBundle(Bundle bundle) {
