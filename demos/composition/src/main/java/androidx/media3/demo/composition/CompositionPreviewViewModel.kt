@@ -251,7 +251,7 @@ class CompositionPreviewViewModel(application: Application, val compositionLayou
         transformer!!.start(composition, filePath)
         Log.i(TAG, "Export started")
     }
-    
+
     private fun prepareComposition(): Composition {
         val editedMediaItems = mutableListOf<EditedMediaItem>()
 
@@ -275,9 +275,7 @@ class CompositionPreviewViewModel(application: Application, val compositionLayou
             val itemBuilder =
                 EditedMediaItem.Builder(mediaItem)
                     .setEffects(
-                        Effects(/* audioProcessors= */ emptyList(), /* videoEffects= */
-                            finalVideoEffects
-                        )
+                        Effects(/* audioProcessors= */ emptyList(), /* videoEffects= */ finalVideoEffects)
                     )
                     // Setting duration explicitly is only required for preview with CompositionPlayer, and
                     // is not needed for export with Transformer.
@@ -292,7 +290,7 @@ class CompositionPreviewViewModel(application: Application, val compositionLayou
             }
         // TODO(b/417365294): Improve how sequences are built
         val videoSequenceBuilders =
-            MutableList<EditedMediaItemSequence.Builder>(numSequences) { _ ->
+            MutableList(numSequences) { _ ->
                 EditedMediaItemSequence.Builder()
             }
         val videoSequences = mutableListOf<EditedMediaItemSequence>()
@@ -370,9 +368,7 @@ class CompositionPreviewViewModel(application: Application, val compositionLayou
         sampleRateChanger.setOutputSampleRateHz(8000)
         return Composition.Builder(videoSequences)
             .setEffects(
-                Effects(/* audioProcessors= */ listOf(sampleRateChanger), /* videoEffects= */
-                    emptyList()
-                )
+                Effects(/* audioProcessors= */ listOf(sampleRateChanger), /* videoEffects= */ emptyList())
             )
             .setVideoCompositorSettings(getVideoCompositorSettings())
             .setHdrMode(outputHdrMode)
@@ -389,19 +385,13 @@ class CompositionPreviewViewModel(application: Application, val compositionLayou
                         return inputSizes[0]
                     }
 
-                    override fun getOverlaySettings(
-                        inputId: Int,
-                        presentationTimeUs: Long
-                    ): OverlaySettings {
+                    override fun getOverlaySettings(inputId: Int, presentationTimeUs: Long): OverlaySettings {
                         return when (inputId) {
                             0 -> {
                                 StaticOverlaySettings.Builder()
                                     .setScale(0.5f, 0.5f)
                                     .setOverlayFrameAnchor(0f, 0f) // Middle of overlay
-                                    .setBackgroundFrameAnchor(
-                                        -0.5f,
-                                        0.5f
-                                    ) // Top-left section of background
+                                    .setBackgroundFrameAnchor(-0.5f, 0.5f) // Top-left section of background
                                     .build()
                             }
 
@@ -409,10 +399,7 @@ class CompositionPreviewViewModel(application: Application, val compositionLayou
                                 StaticOverlaySettings.Builder()
                                     .setScale(0.5f, 0.5f)
                                     .setOverlayFrameAnchor(0f, 0f) // Middle of overlay
-                                    .setBackgroundFrameAnchor(
-                                        0.5f,
-                                        0.5f
-                                    ) // Top-right section of background
+                                    .setBackgroundFrameAnchor(0.5f, 0.5f) // Top-right section of background
                                     .build()
                             }
 
@@ -420,10 +407,7 @@ class CompositionPreviewViewModel(application: Application, val compositionLayou
                                 StaticOverlaySettings.Builder()
                                     .setScale(0.5f, 0.5f)
                                     .setOverlayFrameAnchor(0f, 0f) // Middle of overlay
-                                    .setBackgroundFrameAnchor(
-                                        -0.5f,
-                                        -0.5f
-                                    ) // Bottom-left section of background
+                                    .setBackgroundFrameAnchor(-0.5f, -0.5f) // Bottom-left section of background
                                     .build()
                             }
 
@@ -431,10 +415,7 @@ class CompositionPreviewViewModel(application: Application, val compositionLayou
                                 StaticOverlaySettings.Builder()
                                     .setScale(0.5f, 0.5f)
                                     .setOverlayFrameAnchor(0f, 0f) // Middle of overlay
-                                    .setBackgroundFrameAnchor(
-                                        0.5f,
-                                        -0.5f
-                                    ) // Bottom-right section of background
+                                    .setBackgroundFrameAnchor(0.5f, -0.5f) // Bottom-right section of background
                                     .build()
                             }
 
@@ -455,10 +436,7 @@ class CompositionPreviewViewModel(application: Application, val compositionLayou
                         return inputSizes[0]
                     }
 
-                    override fun getOverlaySettings(
-                        inputId: Int,
-                        presentationTimeUs: Long
-                    ): OverlaySettings {
+                    override fun getOverlaySettings(inputId: Int, presentationTimeUs: Long): OverlaySettings {
                         return if (inputId == 0) {
                             val cycleRadians = 2 * Math.PI * (presentationTimeUs / cycleTimeUs)
                             StaticOverlaySettings.Builder()
@@ -578,8 +556,7 @@ class CompositionPreviewViewModel(application: Application, val compositionLayou
         const val SAME_AS_INPUT_OPTION = "same as input"
         const val LAYOUT_EXTRA = "composition_layout"
         private const val TAG = "CompPreviewVM"
-        private const val AUDIO_URI =
-            "https://storage.googleapis.com/exoplayer-test-media-0/play.mp3"
+        private const val AUDIO_URI = "https://storage.googleapis.com/exoplayer-test-media-0/play.mp3"
         val HDR_MODE_DESCRIPTIONS =
             mapOf(
                 Pair("Keep HDR", Composition.HDR_MODE_KEEP_HDR),
@@ -587,10 +564,7 @@ class CompositionPreviewViewModel(application: Application, val compositionLayou
                     "MediaCodec tone-map HDR to SDR",
                     Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_MEDIACODEC,
                 ),
-                Pair(
-                    "OpenGL tone-map HDR to SDR",
-                    Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL
-                ),
+                Pair("OpenGL tone-map HDR to SDR", Composition.HDR_MODE_TONE_MAP_HDR_TO_SDR_USING_OPEN_GL),
                 Pair(
                     "Force Interpret HDR as SDR",
                     Composition.HDR_MODE_EXPERIMENTAL_FORCE_INTERPRET_HDR_AS_SDR,
@@ -599,17 +573,12 @@ class CompositionPreviewViewModel(application: Application, val compositionLayou
         val RESOLUTION_HEIGHTS =
             listOf(SAME_AS_INPUT_OPTION, "144", "240", "360", "480", "720", "1080", "1440", "2160")
         val MUXER_OPTIONS =
-            listOf(
-                "Use Platform MediaMuxer",
-                "Use Media3 Mp4Muxer",
-                "Use Media3 FragmentedMp4Muxer"
-            )
+            listOf("Use Platform MediaMuxer", "Use Media3 Mp4Muxer", "Use Media3 FragmentedMp4Muxer")
         val COMPOSITION_LAYOUT = listOf("Sequential", "2x2 grid", "PiP overlay")
 
         fun getAudioBackgroundSequence(): EditedMediaItemSequence {
             val audioMediaItem: MediaItem = MediaItem.Builder().setUri(AUDIO_URI).build()
-            val audioItem =
-                EditedMediaItem.Builder(audioMediaItem).setDurationUs(59_000_000).build()
+            val audioItem = EditedMediaItem.Builder(audioMediaItem).setDurationUs(59_000_000).build()
             return EditedMediaItemSequence.Builder(audioItem).setIsLooping(true).build()
         }
     }
