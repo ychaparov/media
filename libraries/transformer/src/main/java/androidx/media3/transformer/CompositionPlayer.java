@@ -136,7 +136,8 @@ public final class CompositionPlayer extends SimpleBasePlayer
       this.context = context.getApplicationContext();
       mediaSourceFactory = new DefaultMediaSourceFactory(context);
       imageDecoderFactory = ImageDecoder.Factory.DEFAULT;
-      videoPrewarmingEnabled = true;
+      // Disable video prewarming for the purposes of this demo.
+      videoPrewarmingEnabled = false;
       clock = Clock.DEFAULT;
     }
 
