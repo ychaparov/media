@@ -55,10 +55,10 @@ import androidx.media3.demo.composition.data.OverlayAsset
 import androidx.media3.demo.composition.data.OverlayState
 import androidx.media3.demo.composition.data.PlacedOverlay
 import androidx.media3.demo.composition.data.PlacementState
+import androidx.media3.demo.composition.effect.HardwareBufferEffectsPipeline
 import androidx.media3.demo.composition.effect.LottieEffectFactory
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.DebugTraceUtil
-import androidx.media3.effect.DefaultHardwareBufferEffectsPipeline
 import androidx.media3.effect.LanczosResample
 import androidx.media3.effect.MultipleInputVideoGraph
 import androidx.media3.effect.OverlayEffect
@@ -496,7 +496,7 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
         NdkTransformerBuilder.create(getApplication())
           .setHardwareBufferEffectsPipeline(
             // TODO: b/449957627 - Implement HardwareBuffer compositing.
-            DefaultHardwareBufferEffectsPipeline()
+            HardwareBufferEffectsPipeline()
           )
       } else {
         Transformer.Builder(/* context= */ getApplication())
