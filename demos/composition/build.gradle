@@ -35,7 +35,7 @@ android {
     defaultConfig {
         versionName project.ext.releaseVersion
         versionCode project.ext.releaseVersionCode
-        minSdkVersion project.ext.minSdkVersion
+        minSdkVersion 34
         targetSdkVersion project.ext.appTargetSdkVersion
     }
 
@@ -55,6 +55,13 @@ android {
 
     buildFeatures {
         compose true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "src/main/jni/CMakeLists.txt"
+            version "3.22.1"
+        }
     }
 }
 

@@ -7,6 +7,8 @@ import android.graphics.RenderNode
 import android.hardware.HardwareBuffer
 import android.hardware.SyncFence
 import androidx.annotation.RequiresApi
+import androidx.media3.common.ColorInfo
+import androidx.media3.common.ColorInfo.SDR_BT709_LIMITED
 import androidx.media3.common.util.Consumer
 import androidx.media3.common.util.ExperimentalApi
 import androidx.media3.common.util.Log
@@ -39,6 +41,10 @@ import kotlin.use
 @ExperimentalApi // TODO: b/449956776 - Remove once FrameConsumer API is finalized.
 class HardwareBufferEffectsPipeline :
     RenderingPacketConsumer<ImmutableList<HardwareBufferFrame>, HardwareBufferFrameQueue> {
+
+    init {
+        System.loadLibrary("composition_jni")
+    }
 
     /** Executor used for all blocking [SyncFence.await] calls. */
     private val internalExecutor = Executors.newSingleThreadExecutor()
@@ -96,6 +102,9 @@ class HardwareBufferEffectsPipeline :
                 )
             releaseFenceForInputFrame = SyncFenceCompat.duplicate(renderCompletionFence)
 
+            // Modify the output buffer using native code.
+            nativeModifyHardwareBuffer(outputFrame.hardwareBuffer!!)
+
             // Send the output buffer downstream.
             val outputFrameWithMetadata =
                 outputFrame
@@ -117,12 +126,19 @@ class HardwareBufferEffectsPipeline :
         val width = inputFrame.format.width
         val height = inputFrame.format.height
         val bufferFormat =
-            HardwareBufferFrameQueue.FrameFormat(
-                width,
-                height,
-                HardwareBuffer.RGBA_8888,
-                HardwareBuffer.USAGE_GPU_COLOR_OUTPUT or HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE,
-            )
+            HardwareBufferFrameQueue.FrameFormat.Builder()
+                .setWidth(width)
+                .setHeight(height)
+                .setPixelFormat(
+                    if (ColorInfo.isTransferHdr(inputFrame.format.colorInfo)) HardwareBuffer.RGBA_1010102
+                    else HardwareBuffer.RGBA_8888
+                )
+                .setUsageFlags(
+                    HardwareBuffer.USAGE_GPU_COLOR_OUTPUT or HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE
+                        or HardwareBuffer.USAGE_CPU_WRITE_OFTEN
+                )
+                .setColorInfo(inputFrame.format.colorInfo ?: SDR_BT709_LIMITED)
+                .build()
 
         // Try and get an output buffer from the queue. If not immediately available, suspend until
         // notified and retry.
@@ -194,6 +210,8 @@ class HardwareBufferEffectsPipeline :
             fence.close()
         }
     }
+
+    private external fun nativeModifyHardwareBuffer(hardwareBuffer: HardwareBuffer)
 
     companion object {
         private const val TAG = "DefaultHBEffects"

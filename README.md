@@ -1,3 +1,5 @@
+DAWN: Make sure the dawn codebase (https://dawn.googlesource.com/dawn) is available under the dawn folder
+
 # AndroidX Media
 
 AndroidX Media is a collection of libraries for implementing media use cases on
