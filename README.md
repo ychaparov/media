@@ -1,5 +1,3 @@
-DAWN: Make sure the dawn codebase (https://dawn.googlesource.com/dawn) is available under the dawn folder
-
 # AndroidX Media
 
 AndroidX Media is a collection of libraries for implementing media use cases on
@@ -108,10 +106,25 @@ Cloning the repository and depending on the modules locally is required when
 using some libraries. It's also a suitable approach if you want to make local
 changes, or if you want to use the `main` branch.
 
-First, clone the repository into a local directory:
+First, clone the repository and initialize the submodules:
 
 ```sh
 git clone https://github.com/androidx/media.git
+cd media
+git submodule update --init
+# Initialize specific Dawn dependencies required for the build
+git -C dawn submodule update --init --recursive \
+    third_party/spirv-headers/src \
+    third_party/spirv-tools/src \
+    third_party/glslang/src \
+    third_party/vulkan-headers/src \
+    third_party/vulkan-utility-libraries/src \
+    third_party/abseil-cpp \
+    third_party/jinja2 \
+    third_party/markupsafe \
+    third_party/webgpu-headers/src \
+    third_party/khronos/OpenGL-Registry \
+    third_party/khronos/EGL-Registry
 ```
 
 Next, add the following to your project's `settings.gradle.kts` file, replacing

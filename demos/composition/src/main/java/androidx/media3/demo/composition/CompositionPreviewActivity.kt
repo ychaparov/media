@@ -890,12 +890,6 @@ class CompositionPreviewActivity : AppCompatActivity() {
   companion object {
     private const val TAG = "CompPreviewActivity"
 
-    init {
-      System.loadLibrary("webgpu_c_bundled")
-    }
-
-    public external fun windowFromSurface(surface: Surface?): Long
-
     fun getLocale(): Locale {
       return if (SDK_INT >= 24) {
         LocaleList.getDefault().get(0) ?: Locale.getDefault()
