@@ -2,7 +2,7 @@
 #include <android/hardware_buffer.h>
 #include <android/hardware_buffer_jni.h>
 #include <android/log.h>
-#include <webgpu/webgpu_cpp.h>
+#include <webgpu/webgpu.h>
 #include <cstring>
 #include <mutex>
 #include <vector>
@@ -15,143 +15,95 @@
 #define VK_IMAGE_LAYOUT_UNDEFINED 0
 #endif
 
-static wgpu::Instance instance;
-static wgpu::Device device;
-static std::mutex g_mutex;
-
-bool InitializeWebGPU() {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    if (device) return true;
-
-    instance = wgpu::CreateInstance();
-    if (!instance) {
-        LOGE("Failed to create WebGPU instance");
-        return false;
-    }
-
-    wgpu::Adapter adapter;
-    instance.RequestAdapter(
-        nullptr,
-        wgpu::CallbackMode::AllowSpontaneous,
-        [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message, wgpu::Adapter* userdata) {
-            if (status == wgpu::RequestAdapterStatus::Success) {
-                *userdata = std::move(adapter);
-            } else {
-                LOGE("Failed to request adapter: %s", message.data ? message.data : "unknown error");
-            }
-        },
-        &adapter);
-
-    if (!adapter) return false;
-
-    std::vector<wgpu::FeatureName> features;
-    if (adapter.HasFeature(wgpu::FeatureName::SharedTextureMemoryAHardwareBuffer)) {
-        features.push_back(wgpu::FeatureName::SharedTextureMemoryAHardwareBuffer);
-    } else {
-        LOGE("Adapter does not support SharedTextureMemoryAHardwareBuffer");
-        return false;
-    }
-    
-    // Also request synchronization features if available
-    if (adapter.HasFeature(wgpu::FeatureName::SharedFenceSyncFD)) {
-        features.push_back(wgpu::FeatureName::SharedFenceSyncFD);
-    }
-
-    wgpu::DeviceDescriptor deviceDesc = {};
-    deviceDesc.requiredFeatureCount = features.size();
-    deviceDesc.requiredFeatures = features.data();
-    deviceDesc.SetUncapturedErrorCallback(
-        [](const wgpu::Device& device, wgpu::ErrorType type, wgpu::StringView message) {
-            LOGE("WebGPU Uncaptured Error: %.*s", static_cast<int>(message.length), message.data);
-        });
-
-    adapter.RequestDevice(
-        &deviceDesc,
-        wgpu::CallbackMode::AllowSpontaneous,
-        [](wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message, wgpu::Device* userdata) {
-            if (status == wgpu::RequestDeviceStatus::Success) {
-                *userdata = std::move(device);
-            } else {
-                LOGE("Failed to request device: %s", message.data ? message.data : "unknown error");
-            }
-        },
-        &device);
-
-    if (!device) return false;
-
-    return true;
-}
-
-extern "C" JNIEXPORT void JNICALL
-Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativeModifyHardwareBuffer(
-    JNIEnv* env, jobject thiz, jobject hardwareBuffer) {
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativeLockHardwareBuffer(
+    JNIEnv* env, jobject thiz, jlong deviceHandle, jobject hardwareBuffer) {
   
-  if (!InitializeWebGPU()) {
-      return;
-  }
-
+  WGPUDevice device = reinterpret_cast<WGPUDevice>(deviceHandle);
   AHardwareBuffer* hb = AHardwareBuffer_fromHardwareBuffer(env, hardwareBuffer);
   if (!hb) {
     LOGE("Failed to get AHardwareBuffer from jobject");
-    return;
+    return nullptr;
   }
 
-  AHardwareBuffer_Desc hbDesc;
-  AHardwareBuffer_describe(hb, &hbDesc);
-
-  wgpu::SharedTextureMemoryAHardwareBufferDescriptor stmAHardwareBufferDesc;
+  WGPUSharedTextureMemoryAHardwareBufferDescriptor stmAHardwareBufferDesc = {};
+  stmAHardwareBufferDesc.chain.sType = WGPUSType_SharedTextureMemoryAHardwareBufferDescriptor;
   stmAHardwareBufferDesc.handle = hb;
 
-  wgpu::SharedTextureMemoryDescriptor stmDesc;
-  stmDesc.nextInChain = &stmAHardwareBufferDesc;
-  stmDesc.label = "Imported HardwareBuffer";
+  WGPUSharedTextureMemoryDescriptor stmDesc = {};
+  stmDesc.nextInChain = &stmAHardwareBufferDesc.chain;
+  stmDesc.label = { "Imported HardwareBuffer", WGPU_STRLEN };
 
-  wgpu::SharedTextureMemory memory = device.ImportSharedTextureMemory(&stmDesc);
+  WGPUSharedTextureMemory memory = wgpuDeviceImportSharedTextureMemory(device, &stmDesc);
   if (!memory) {
       LOGE("Failed to import SharedTextureMemory");
-      return;
+      return nullptr;
   }
 
-  wgpu::Texture texture = memory.CreateTexture();
+  WGPUTexture texture = wgpuSharedTextureMemoryCreateTexture(memory, nullptr);
   if (!texture) {
       LOGE("Failed to create texture from SharedTextureMemory");
-      return;
+      return nullptr;
   }
 
-  wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
-  
-  wgpu::RenderPassColorAttachment colorAttachment;
-  colorAttachment.view = texture.CreateView();
-  colorAttachment.loadOp = wgpu::LoadOp::Clear;
-  colorAttachment.storeOp = wgpu::StoreOp::Store;
-  colorAttachment.clearValue = {0.0, 1.0, 0.0, 1.0}; // Green clear
-
-  wgpu::RenderPassDescriptor passDesc;
-  passDesc.colorAttachmentCount = 1;
-  passDesc.colorAttachments = &colorAttachment;
-
-  wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&passDesc);
-  pass.End();
-
-  wgpu::CommandBuffer commandBuffer = encoder.Finish();
-
-  wgpu::SharedTextureMemoryBeginAccessDescriptor beginDesc = {};
-  wgpu::SharedTextureMemoryVkImageLayoutBeginState beginLayout{};
+  WGPUSharedTextureMemoryBeginAccessDescriptor beginDesc = {};
+  WGPUSharedTextureMemoryVkImageLayoutBeginState beginLayout{};
+  beginLayout.chain.sType = WGPUSType_SharedTextureMemoryVkImageLayoutBeginState;
   beginLayout.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   beginLayout.newLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-  beginDesc.nextInChain = &beginLayout;
+  beginDesc.nextInChain = &beginLayout.chain;
   
-  if (!memory.BeginAccess(texture, &beginDesc)) {
+  if (!wgpuSharedTextureMemoryBeginAccess(memory, texture, &beginDesc)) {
       LOGE("Failed to begin access to SharedTextureMemory");
-      return;
+      return nullptr;
   }
 
-  device.GetQueue().Submit(1, &commandBuffer);
+  jclass textureClass = env->FindClass("androidx/webgpu/GPUTexture");
+  if (env->ExceptionCheck()) return nullptr;
+  jmethodID textureInit = env->GetMethodID(textureClass, "<init>", "(J)V");
+  if (env->ExceptionCheck()) return nullptr;
+  jobject textureObj = env->NewObject(textureClass, textureInit, reinterpret_cast<jlong>(texture));
+  if (env->ExceptionCheck()) return nullptr;
 
-  wgpu::SharedTextureMemoryEndAccessState endState = {};
-  wgpu::SharedTextureMemoryVkImageLayoutEndState endLayout{};
-  endState.nextInChain = &endLayout;
-  if (!memory.EndAccess(texture, &endState)) {
+  jclass longClass = env->FindClass("java/lang/Long");
+  if (env->ExceptionCheck()) return nullptr;
+  jmethodID valueOf = env->GetStaticMethodID(longClass, "valueOf", "(J)Ljava/lang/Long;");
+  if (env->ExceptionCheck()) return nullptr;
+  jobject memoryObj = env->CallStaticObjectMethod(longClass, valueOf, reinterpret_cast<jlong>(memory));
+  if (env->ExceptionCheck()) return nullptr;
+
+  jobjectArray result = env->NewObjectArray(2, env->FindClass("java/lang/Object"), nullptr);
+  env->SetObjectArrayElement(result, 0, textureObj);
+  env->SetObjectArrayElement(result, 1, memoryObj);
+  return result;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativeUnlockHardwareBuffer(
+    JNIEnv* env, jobject thiz, jobject textureObj, jobject memoryLongObj) {
+  
+  if (!textureObj || !memoryLongObj) return;
+
+  jclass textureClass = env->GetObjectClass(textureObj);
+  jmethodID getHandle = env->GetMethodID(textureClass, "getHandle", "()J");
+  if (env->ExceptionCheck()) return;
+  WGPUTexture texture = reinterpret_cast<WGPUTexture>(env->CallLongMethod(textureObj, getHandle));
+
+  jclass longClass = env->FindClass("java/lang/Long");
+  jmethodID longValue = env->GetMethodID(longClass, "longValue", "()J");
+  if (env->ExceptionCheck()) return;
+  WGPUSharedTextureMemory memory = reinterpret_cast<WGPUSharedTextureMemory>(env->CallLongMethod(memoryLongObj, longValue));
+
+  WGPUSharedTextureMemoryEndAccessState endState = {};
+  WGPUSharedTextureMemoryVkImageLayoutEndState endLayout{};
+  endLayout.chain.sType = WGPUSType_SharedTextureMemoryVkImageLayoutEndState;
+  endState.nextInChain = &endLayout.chain;
+  
+  if (!wgpuSharedTextureMemoryEndAccess(memory, texture, &endState)) {
       LOGE("Failed to end access to SharedTextureMemory");
   }
+
+  // Release the texture and memory here as they were created in nativeLockHardwareBuffer.
+  wgpuTextureRelease(texture);
+  wgpuSharedTextureMemoryRelease(memory);
 }

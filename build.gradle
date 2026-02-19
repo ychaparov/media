@@ -44,6 +44,19 @@ allprojects {
     group = 'androidx.media3'
 }
 
+project(':webgpu') {
+    afterEvaluate {
+        android.defaultConfig.externalNativeBuild.cmake {
+            arguments '-DDAWN_BUILD_TESTS=OFF',
+                      '-DDAWN_BUILD_SAMPLES=OFF',
+                      '-DDAWN_BUILD_BENCHMARKS=OFF',
+                      '-DDAWN_BUILD_PROTOBUF=OFF',
+                      '-DTINT_BUILD_TESTS=OFF',
+                      '-DTINT_BUILD_IR_BINARY=OFF'
+        }
+    }
+}
+
 task printReleaseArtifactIds {
     description = "Prints the releaseArtifactId of modules configured for publishing."
     doLast {

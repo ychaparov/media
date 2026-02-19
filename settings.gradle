@@ -52,6 +52,9 @@ project(modulePrefix + 'demo-surface').projectDir = new File(rootDir, 'demos/sur
 include modulePrefix + 'demo-transformer'
 project(modulePrefix + 'demo-transformer').projectDir = new File(rootDir, 'demos/transformer')
 
+include ':webgpu'
+project(':webgpu').projectDir = new File(rootDir, 'dawn/tools/android/webgpu')
+
 // Modules that only contain tests (not utils used by other test modules)
 include modulePrefix + 'test-exoplayer-playback'
 project(modulePrefix + 'test-exoplayer-playback').projectDir = new File(rootDir, 'libraries/test_exoplayer_playback')
