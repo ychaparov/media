@@ -22,9 +22,21 @@ import androidx.media3.effect.SyncFenceCompat
 import androidx.webgpu.GPUColor
 import androidx.webgpu.GPUCommandEncoderDescriptor
 import androidx.webgpu.GPUDeviceDescriptor
+import androidx.webgpu.GPUPipelineLayout
+import androidx.webgpu.GPURenderPipeline
+import androidx.webgpu.GPUShaderModule
 import androidx.webgpu.LoadOp
 import androidx.webgpu.GPURenderPassColorAttachment
 import androidx.webgpu.GPURenderPassDescriptor
+import androidx.webgpu.GPUColorTargetState
+import androidx.webgpu.GPUFragmentState
+import androidx.webgpu.GPUPipelineLayoutDescriptor
+import androidx.webgpu.GPUPrimitiveState
+import androidx.webgpu.GPURenderPipelineDescriptor
+import androidx.webgpu.GPUShaderModuleDescriptor
+import androidx.webgpu.GPUShaderSourceWGSL
+import androidx.webgpu.GPUVertexState
+import androidx.webgpu.PrimitiveTopology
 import androidx.webgpu.StoreOp
 import androidx.webgpu.GPUTexture
 import androidx.webgpu.GPUTextureViewDescriptor
@@ -68,6 +80,9 @@ class HardwareBufferEffectsPipeline :
     private var outputBufferQueue: HardwareBufferFrameQueue? = null
 
     private var webGpu: WebGpu? = null
+    private var shaderModule: GPUShaderModule? = null
+    private var pipelineLayout: GPUPipelineLayout? = null
+    private var pipeline: GPURenderPipeline? = null
 
     override fun setRenderOutput(output: HardwareBufferFrameQueue?) {
         this.outputBufferQueue = output
@@ -93,8 +108,18 @@ class HardwareBufferEffectsPipeline :
     override suspend fun release() {
         if (!isReleased.getAndSet(true)) {
             internalExecutor.shutdown()
+            releaseResources()
             webGpu?.close()
         }
+    }
+
+    private fun releaseResources() {
+        pipeline?.close()
+        pipeline = null
+        pipelineLayout?.close()
+        pipelineLayout = null
+        shaderModule?.close()
+        shaderModule = null
     }
 
     private suspend fun processFrame(inputFrame: HardwareBufferFrame) {
@@ -120,7 +145,9 @@ class HardwareBufferEffectsPipeline :
             releaseFenceForInputFrame = SyncFenceCompat.duplicate(renderCompletionFence)
 
             // Modify the output buffer using WebGPU.
-            modifyHardwareBufferWithWebGpu(outputFrame.hardwareBuffer!!)
+            val webGpuOutputFence = SyncFenceCompat.duplicate(renderCompletionFence).use { webGpuFence ->
+                modifyHardwareBufferWithWebGpu(outputFrame.hardwareBuffer!!, webGpuFence)
+            }
 
             // Send the output buffer downstream.
             val outputFrameWithMetadata =
@@ -130,7 +157,7 @@ class HardwareBufferEffectsPipeline :
                     .setReleaseTimeNs(inputFrame.releaseTimeNs)
                     .setFormat(inputFrame.format)
                     .setMetadata(inputFrame.metadata)
-                    .setAcquireFence(SyncFenceCompat.duplicate(renderCompletionFence))
+                    .setAcquireFence(webGpuOutputFence ?: SyncFenceCompat.duplicate(renderCompletionFence))
                     .build()
             outputBufferQueue!!.queue(outputFrameWithMetadata)
             renderCompletionFence.close()
@@ -139,7 +166,10 @@ class HardwareBufferEffectsPipeline :
         }
     }
 
-    private suspend fun modifyHardwareBufferWithWebGpu(hardwareBuffer: HardwareBuffer) {
+    private suspend fun modifyHardwareBufferWithWebGpu(
+        hardwareBuffer: HardwareBuffer,
+        fence: SyncFenceCompat
+    ): SyncFenceCompat? {
         if (webGpu == null) {
             val executor = Executor { it.run() }
             webGpu = createWebGpu(
@@ -158,37 +188,99 @@ class HardwareBufferEffectsPipeline :
         val device = webGpu!!.device
 
         // Lock the hardware buffer and get the texture/memory objects.
-        val objects = nativeLockHardwareBuffer(device.handle, hardwareBuffer)
+        val objects = nativeLockHardwareBuffer(device.handle, hardwareBuffer, fence.detachFd())
         val texture = objects[0] as GPUTexture
         val memory = objects[1]
+        val sharedFence = objects[2]
 
-        try {
-            val encoder = device.createCommandEncoder(GPUCommandEncoderDescriptor())
+        return texture.use {
+            try {
+                var currentPipeline = pipeline
+                if (currentPipeline == null) {
+                    releaseResources()
+                    val newShaderModule = device.createShaderModule(
+                        GPUShaderModuleDescriptor(
+                            shaderSourceWGSL = GPUShaderSourceWGSL(
+                                code = """
+                                @vertex fn vsMain(@builtin(vertex_index) vertexIndex : u32) -> @builtin(position) vec4<f32> {
+                                    var pos = array<vec2<f32>, 3>(
+                                        vec2<f32>(-1.0, -1.0),
+                                        vec2<f32>( 3.0, -1.0),
+                                        vec2<f32>(-1.0,  3.0)
+                                    );
+                                    return vec4<f32>(pos[vertexIndex], 0.0, 1.0);
+                                }
+                                @fragment fn fsMain() -> @location(0) vec4<f32> {
+                                    return vec4<f32>(0.0, 1.0, 0.0, 1.0);
+                                }
+                            """.trimIndent()
+                            )
+                        )
+                    )
+                    shaderModule = newShaderModule
+                    val newPipelineLayout = device.createPipelineLayout(GPUPipelineLayoutDescriptor())
+                    pipelineLayout = newPipelineLayout
+                    currentPipeline = device.createRenderPipeline(
+                        GPURenderPipelineDescriptor(
+                            layout = newPipelineLayout,
+                            vertex = GPUVertexState(module = newShaderModule, entryPoint = "vsMain"),
+                            fragment = GPUFragmentState(
+                                module = newShaderModule,
+                                entryPoint = "fsMain",
+                                targets = arrayOf(GPUColorTargetState(format = texture.format))
+                            ),
+                            primitive = GPUPrimitiveState(topology = PrimitiveTopology.TriangleList)
+                        )
+                    )
+                    pipeline = currentPipeline
+                }
 
-            val colorAttachment = GPURenderPassColorAttachment(
-                view = texture.createView(GPUTextureViewDescriptor()),
-                loadOp = LoadOp.Clear,
-                storeOp = StoreOp.Store,
-                clearValue = GPUColor(0.0, 1.0, 0.0, 1.0) // Green clear
-            )
+                val encoder = device.createCommandEncoder(GPUCommandEncoderDescriptor())
 
-            val passDesc = GPURenderPassDescriptor(
-                colorAttachments = arrayOf(colorAttachment)
-            )
+                val colorAttachment = GPURenderPassColorAttachment(
+                    clearValue = GPUColor(0.0, 0.0, 0.0, 0.0), // Ignored for LoadOp.Load
+                    view = texture.createView(GPUTextureViewDescriptor()),
+                    loadOp = LoadOp.Load, // Preserves the input frame drawn by HardwareBufferRenderer
+                    storeOp = StoreOp.Store
+                )
 
-            val pass = encoder.beginRenderPass(passDesc)
-            pass.end()
+                val passDesc = GPURenderPassDescriptor(
+                    colorAttachments = arrayOf(colorAttachment)
+                )
 
-            val commandBuffer = encoder.finish()
-            device.queue.submit(arrayOf(commandBuffer))
+                val pass = encoder.beginRenderPass(passDesc)
+                pass.setPipeline(currentPipeline!!)
+                // Draw only on the left half of the buffer.
+                pass.setViewport(
+                    0f,
+                    0f,
+                    hardwareBuffer.width / 2f,
+                    hardwareBuffer.height.toFloat(),
+                    0f,
+                    1f
+                )
+                pass.setScissorRect(0, 0, hardwareBuffer.width / 2, hardwareBuffer.height)
+                pass.draw(3)
+                pass.end()
 
-            // Clean up resources used in this frame
-            commandBuffer.close()
-            encoder.close()
-            colorAttachment.view!!.close()
-        } finally {
-            // Unlock and release native resources (texture and memory created in Lock).
-            nativeUnlockHardwareBuffer(texture, memory)
+                val commandBuffer = encoder.finish()
+                device.queue.submit(arrayOf(commandBuffer))
+
+                // Clean up resources used in this frame
+                commandBuffer.close()
+                encoder.close()
+                colorAttachment.view!!.close()
+                pass.close()
+                null // Placeholder, fence is returned from Unlock
+            } finally {
+                // Unlock and release native resources (memory and fence created in Lock).
+                // texture is closed by .use block, but we pass it to EndAccess first.
+                val outFenceFd = nativeUnlockHardwareBuffer(texture, memory, sharedFence)
+                if (outFenceFd >= 0) {
+                    return@use SyncFenceCompat.adoptFenceFileDescriptor(outFenceFd)
+                }
+            }
+            null
         }
     }
 
@@ -283,10 +375,15 @@ class HardwareBufferEffectsPipeline :
 
     private external fun nativeLockHardwareBuffer(
         deviceHandle: Long,
-        hardwareBuffer: HardwareBuffer
+        hardwareBuffer: HardwareBuffer,
+        fenceFd: Int
     ): Array<Any>
 
-    private external fun nativeUnlockHardwareBuffer(texture: GPUTexture, memory: Any)
+    private external fun nativeUnlockHardwareBuffer(
+        texture: GPUTexture?,
+        memory: Any,
+        fence: Any?
+    ): Int
 
     companion object {
         private const val TAG = "DefaultHBEffects"
