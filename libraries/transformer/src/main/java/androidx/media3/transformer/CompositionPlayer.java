@@ -629,7 +629,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
   private @PlayWhenReadyChangeReason int playWhenReadyChangeReason;
   private @RepeatMode int repeatMode;
   private float volume;
-  private boolean renderedFirstFrame = true;
+  private boolean renderedFirstFrame;
   private boolean packetConsumerEnded;
   @Nullable private VideoSize videoSize;
   @Nullable private Object videoOutput;
@@ -924,8 +924,8 @@ public final class CompositionPlayer extends SimpleBasePlayer {
             .setTotalBufferedDurationMs(totalBufferedDurationSupplier)
             .setNewlyRenderedFirstFrame(getRenderedFirstFrameAndReset())
             .setPlaybackSuppressionReason(playbackSuppressionReason);
-    if (packetConsumer != null) {
-      state.setVideoSize(new VideoSize(1280, 720));
+    if (packetConsumer != null && videoSize != null) {
+      state.setVideoSize(videoSize);
     }
     if (repeatingCompositionSeekInProgress) {
       state.setPositionDiscontinuity(DISCONTINUITY_REASON_AUTO_TRANSITION, C.TIME_UNSET);
@@ -1894,10 +1894,9 @@ public final class CompositionPlayer extends SimpleBasePlayer {
   }
 
   private boolean getRenderedFirstFrameAndReset() {
-    return true;
-//    boolean value = renderedFirstFrame;
-//    renderedFirstFrame = false;
-//    return value;
+    boolean value = renderedFirstFrame;
+    renderedFirstFrame = false;
+    return value;
   }
 
   private void maybeUpdatePlaybackError(

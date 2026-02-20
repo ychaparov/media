@@ -90,33 +90,47 @@ class HardwareBufferEffectsPipeline :
             val outputFrame = getOutputFrame(inputFrame)
             check(outputFrame.hardwareBuffer != null)
 
-            // Draw the input buffer contents into the output buffer.
-            val renderCompletionFence =
-                renderToOutputBuffer(
-                    inputFrame.hardwareBuffer!!,
-                    inputFrame.acquireFence,
-                    inputFrame.format.width,
-                    inputFrame.format.height,
-                    outputFrame.hardwareBuffer!!,
-                    outputFrame.acquireFence,
-                )
-            releaseFenceForInputFrame = SyncFenceCompat.duplicate(renderCompletionFence)
+            if ((inputFrame.presentationTimeUs / 2000000) % 2 == 0L) {
+                // Draw the input buffer contents into the output buffer.
+                val renderCompletionFence =
+                    renderToOutputBuffer(
+                        inputFrame.hardwareBuffer!!,
+                        inputFrame.acquireFence,
+                        inputFrame.format.width,
+                        inputFrame.format.height,
+                        outputFrame.hardwareBuffer!!,
+                        outputFrame.acquireFence,
+                    )
+                releaseFenceForInputFrame = SyncFenceCompat.duplicate(renderCompletionFence)
 
-            // Modify the output buffer using native code.
-            nativeModifyHardwareBuffer(outputFrame.hardwareBuffer!!)
+                // Send the output buffer downstream.
+                val outputFrameWithMetadata =
+                    outputFrame
+                        .buildUpon()
+                        .setPresentationTimeUs(inputFrame.presentationTimeUs)
+                        .setReleaseTimeNs(inputFrame.releaseTimeNs)
+                        .setFormat(inputFrame.format)
+                        .setMetadata(inputFrame.metadata)
+                        .setAcquireFence(SyncFenceCompat.duplicate(renderCompletionFence))
+                        .build()
+                outputBufferQueue!!.queue(outputFrameWithMetadata)
+                renderCompletionFence.close()
+            } else {
+                // Modify the output buffer using native code.
+                nativeModifyHardwareBuffer(outputFrame.hardwareBuffer!!)
 
-            // Send the output buffer downstream.
-            val outputFrameWithMetadata =
-                outputFrame
-                    .buildUpon()
-                    .setPresentationTimeUs(inputFrame.presentationTimeUs)
-                    .setReleaseTimeNs(inputFrame.releaseTimeNs)
-                    .setFormat(inputFrame.format)
-                    .setMetadata(inputFrame.metadata)
-                    .setAcquireFence(SyncFenceCompat.duplicate(renderCompletionFence))
-                    .build()
-            outputBufferQueue!!.queue(outputFrameWithMetadata)
-            renderCompletionFence.close()
+                // Send the output buffer downstream.
+                val outputFrameWithMetadata =
+                    outputFrame
+                        .buildUpon()
+                        .setPresentationTimeUs(inputFrame.presentationTimeUs)
+                        .setReleaseTimeNs(inputFrame.releaseTimeNs)
+                        .setFormat(inputFrame.format)
+                        .setMetadata(inputFrame.metadata)
+                        .setAcquireFence(null)
+                        .build()
+                outputBufferQueue!!.queue(outputFrameWithMetadata)
+            }
         } finally {
             inputFrame.release(releaseFenceForInputFrame)
         }

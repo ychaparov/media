@@ -776,7 +776,7 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
     frameConsumerEnabled = uiState.value.outputSettingsState.frameConsumerEnabled
     if (uiState.value.outputSettingsState.frameConsumerEnabled && SDK_INT >= 34) {
       playerBuilder = NdkCompositionPlayerBuilder.create(getApplication())
-      playerBuilder.setHardwareBufferEffectsPipeline(DefaultHardwareBufferEffectsPipeline())
+      playerBuilder.setHardwareBufferEffectsPipeline(HardwareBufferEffectsPipeline())
       playerBuilder.setGlThreadExecutorService(glExecutorService)
     } else {
       playerBuilder = CompositionPlayer.Builder(getApplication())
