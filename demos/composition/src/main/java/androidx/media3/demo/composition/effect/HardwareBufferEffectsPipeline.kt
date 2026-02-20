@@ -117,7 +117,7 @@ class HardwareBufferEffectsPipeline :
                 renderCompletionFence.close()
             } else {
                 // Modify the output buffer using native code.
-                nativeModifyHardwareBuffer(outputFrame.hardwareBuffer!!)
+                nativeModifyHardwareBuffer(outputFrame.hardwareBuffer!!, inputFrame.presentationTimeUs)
 
                 // Send the output buffer downstream.
                 val outputFrameWithMetadata =
@@ -225,7 +225,7 @@ class HardwareBufferEffectsPipeline :
         }
     }
 
-    private external fun nativeModifyHardwareBuffer(hardwareBuffer: HardwareBuffer)
+    private external fun nativeModifyHardwareBuffer(hardwareBuffer: HardwareBuffer, presentationTimeUs: Long)
 
     companion object {
         private const val TAG = "DefaultHBEffects"

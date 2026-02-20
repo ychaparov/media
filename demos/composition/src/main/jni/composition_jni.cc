@@ -92,7 +92,7 @@ bool InitializeWebGPU() {
 
 extern "C" JNIEXPORT void JNICALL
 Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativeModifyHardwareBuffer(
-    JNIEnv* env, jobject thiz, jobject hardwareBuffer) {
+    JNIEnv* env, jobject thiz, jobject hardwareBuffer, jlong presentationTimeUs) {
   
   if (!InitializeWebGPU()) {
       return;
@@ -132,7 +132,10 @@ Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativ
   colorAttachment.view = texture.CreateView();
   colorAttachment.loadOp = wgpu::LoadOp::Clear;
   colorAttachment.storeOp = wgpu::StoreOp::Store;
-  colorAttachment.clearValue = {0.0, 1.0, 0.0, 1.0}; // Green clear
+
+  double g = static_cast<double>(presentationTimeUs % 2000000) / 2000000.0;
+  double r = 1.0 - g;
+  colorAttachment.clearValue = {r, g, 0.0, 1.0};
 
   wgpu::RenderPassDescriptor passDesc;
   passDesc.colorAttachmentCount = 1;
