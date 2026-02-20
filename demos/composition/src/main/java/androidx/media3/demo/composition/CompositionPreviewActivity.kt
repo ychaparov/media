@@ -15,7 +15,6 @@
  */
 package androidx.media3.demo.composition
 
-import android.view.Surface
 import android.Manifest
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
@@ -110,7 +109,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.media3.common.MimeTypes
-import androidx.media3.common.util.Log
 import androidx.media3.demo.composition.CompositionPreviewViewModel.Companion.HDR_MODE_DESCRIPTIONS
 import androidx.media3.demo.composition.CompositionPreviewViewModel.Companion.MUXER_OPTIONS
 import androidx.media3.demo.composition.CompositionPreviewViewModel.Companion.RESOLUTION_HEIGHTS
@@ -898,5 +896,4 @@ class CompositionPreviewActivity : AppCompatActivity() {
       }
     }
   }
-
 }

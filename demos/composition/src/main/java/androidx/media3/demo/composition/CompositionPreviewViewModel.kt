@@ -57,7 +57,6 @@ import androidx.media3.demo.composition.data.PlacedOverlay
 import androidx.media3.demo.composition.data.PlacementState
 import androidx.media3.demo.composition.effect.HardwareBufferEffectsPipeline
 import androidx.media3.demo.composition.effect.LottieEffectFactory
-import androidx.media3.demo.composition.effect.RenderToSurface
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.DebugTraceUtil
 import androidx.media3.effect.LanczosResample
@@ -776,7 +775,7 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
     frameConsumerEnabled = uiState.value.outputSettingsState.frameConsumerEnabled
     if (uiState.value.outputSettingsState.frameConsumerEnabled && SDK_INT >= 34) {
       playerBuilder = NdkCompositionPlayerBuilder.create(getApplication())
-      playerBuilder.setHardwareBufferEffectsPipeline(DefaultHardwareBufferEffectsPipeline())
+      playerBuilder.setHardwareBufferEffectsPipeline(HardwareBufferEffectsPipeline())
       playerBuilder.setGlThreadExecutorService(glExecutorService)
     } else {
       playerBuilder = CompositionPlayer.Builder(getApplication())

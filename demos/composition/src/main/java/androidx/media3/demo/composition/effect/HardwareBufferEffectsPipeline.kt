@@ -23,37 +23,26 @@ import androidx.webgpu.GPUColor
 import androidx.webgpu.GPUCommandEncoderDescriptor
 import androidx.webgpu.GPUDeviceDescriptor
 import androidx.webgpu.GPUPipelineLayout
-import androidx.webgpu.GPURenderPipeline
-import androidx.webgpu.GPUShaderModule
-import androidx.webgpu.LoadOp
 import androidx.webgpu.GPURenderPassColorAttachment
 import androidx.webgpu.GPURenderPassDescriptor
-import androidx.webgpu.GPUColorTargetState
-import androidx.webgpu.GPUFragmentState
-import androidx.webgpu.GPUPipelineLayoutDescriptor
-import androidx.webgpu.GPUPrimitiveState
-import androidx.webgpu.GPURenderPipelineDescriptor
-import androidx.webgpu.GPUShaderModuleDescriptor
-import androidx.webgpu.GPUShaderSourceWGSL
-import androidx.webgpu.GPUVertexState
-import androidx.webgpu.PrimitiveTopology
-import androidx.webgpu.StoreOp
+import androidx.webgpu.GPURenderPipeline
+import androidx.webgpu.GPUShaderModule
 import androidx.webgpu.GPUTexture
 import androidx.webgpu.GPUTextureViewDescriptor
+import androidx.webgpu.LoadOp
+import androidx.webgpu.StoreOp
 import androidx.webgpu.helper.WebGpu
 import androidx.webgpu.helper.createWebGpu
 import com.google.common.collect.ImmutableList
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.use
 
 /** TODO */
 // TODO: b/479415308 - Replace HardwareBufferRenderer with another method of copying data to support
@@ -76,6 +65,7 @@ class HardwareBufferEffectsPipeline :
     private val internalExecutor = Executors.newSingleThreadExecutor()
     private val internalDispatcher = internalExecutor.asCoroutineDispatcher()
     private val isReleased = AtomicBoolean(false)
+
     // TODO: b/479134794 - This being nullable and mutable adds complexity, simplify this.
     private var outputBufferQueue: HardwareBufferFrameQueue? = null
 
@@ -132,21 +122,34 @@ class HardwareBufferEffectsPipeline :
             val outputFrame = getOutputFrame(inputFrame)
             check(outputFrame.hardwareBuffer != null)
 
-            // Draw the input buffer contents into the output buffer.
-            val renderCompletionFence =
-                renderToOutputBuffer(
-                    inputFrame.hardwareBuffer!!,
-                    inputFrame.acquireFence,
-                    inputFrame.format.width,
-                    inputFrame.format.height,
-                    outputFrame.hardwareBuffer!!,
-                    outputFrame.acquireFence,
-                )
-            releaseFenceForInputFrame = SyncFenceCompat.duplicate(renderCompletionFence)
-
-            // Modify the output buffer using WebGPU.
-            val webGpuOutputFence = SyncFenceCompat.duplicate(renderCompletionFence).use { webGpuFence ->
-                modifyHardwareBufferWithWebGpu(outputFrame.hardwareBuffer!!, webGpuFence)
+            var renderCompleteFence: SyncFenceCompat?
+            if ((inputFrame.presentationTimeUs / 2_000_000) % 2 == 0L) {
+                // Draw the input buffer contents into the output buffer.
+                val renderCompletionFence =
+                    renderToOutputBuffer(
+                        inputFrame.hardwareBuffer!!,
+                        inputFrame.acquireFence,
+                        inputFrame.format.width,
+                        inputFrame.format.height,
+                        outputFrame.hardwareBuffer!!,
+                        outputFrame.acquireFence,
+                    )
+                releaseFenceForInputFrame = SyncFenceCompat.duplicate(renderCompletionFence)
+                renderCompleteFence = SyncFenceCompat.duplicate(renderCompletionFence)
+                renderCompletionFence.close()
+            } else {
+                val webGpuFence = withContext(Dispatchers.Main) {
+                    // Avoid is a race condition between instance.processEvents()
+                    // and wgpuSharedTextureMemoryEndAccess.
+                    // Force our webgpu-native code to run on the main thread, same as
+                    // dawn-kotlin
+                    // https://github.com/androidx/androidx/blob/0315fbf69997dd38e93cb82fd62ca3bc3943c10d/webgpu/webgpu/src/main/java/androidx/webgpu/helper/WebGpu.kt#L80-L93
+                    return@withContext modifyHardwareBufferWithWebGpu(
+                        outputFrame.hardwareBuffer!!,
+                        inputFrame.presentationTimeUs % 2_000_000
+                    )
+                }
+                renderCompleteFence = SyncFenceCompat.adoptFenceFileDescriptor(webGpuFence)
             }
 
             // Send the output buffer downstream.
@@ -157,10 +160,9 @@ class HardwareBufferEffectsPipeline :
                     .setReleaseTimeNs(inputFrame.releaseTimeNs)
                     .setFormat(inputFrame.format)
                     .setMetadata(inputFrame.metadata)
-                    .setAcquireFence(webGpuOutputFence ?: SyncFenceCompat.duplicate(renderCompletionFence))
+                    .setAcquireFence(renderCompleteFence)
                     .build()
             outputBufferQueue!!.queue(outputFrameWithMetadata)
-            renderCompletionFence.close()
         } finally {
             inputFrame.release(releaseFenceForInputFrame)
         }
@@ -168,8 +170,8 @@ class HardwareBufferEffectsPipeline :
 
     private suspend fun modifyHardwareBufferWithWebGpu(
         hardwareBuffer: HardwareBuffer,
-        fence: SyncFenceCompat
-    ): SyncFenceCompat? {
+        presentationTimeUs: Long
+    ): Int {
         if (webGpu == null) {
             val executor = Executor { it.run() }
             webGpu = createWebGpu(
@@ -180,108 +182,50 @@ class HardwareBufferEffectsPipeline :
                     uncapturedErrorCallback = null,
                     requiredFeatures = intArrayOf(
                         0x0005001E, // SharedTextureMemoryAHardwareBuffer
-                        0x00050027  // SharedFenceSyncFD
+                        0x00050027  // WGPUFeatureName_SharedFenceSyncFD
                     )
                 )
             )
         }
         val device = webGpu!!.device
 
-        // Lock the hardware buffer and get the texture/memory objects.
-        val objects = nativeLockHardwareBuffer(device.handle, hardwareBuffer, fence.detachFd())
+        // TODO: wait on a fence that signals when we can start writing to hardwareBuffer
+        val objects = nativeLockHardwareBuffer(device.handle, hardwareBuffer)
         val texture = objects[0] as GPUTexture
         val memory = objects[1]
-        val sharedFence = objects[2]
 
-        return texture.use {
-            try {
-                var currentPipeline = pipeline
-                if (currentPipeline == null) {
-                    releaseResources()
-                    val newShaderModule = device.createShaderModule(
-                        GPUShaderModuleDescriptor(
-                            shaderSourceWGSL = GPUShaderSourceWGSL(
-                                code = """
-                                @vertex fn vsMain(@builtin(vertex_index) vertexIndex : u32) -> @builtin(position) vec4<f32> {
-                                    var pos = array<vec2<f32>, 3>(
-                                        vec2<f32>(-1.0, -1.0),
-                                        vec2<f32>( 3.0, -1.0),
-                                        vec2<f32>(-1.0,  3.0)
-                                    );
-                                    return vec4<f32>(pos[vertexIndex], 0.0, 1.0);
-                                }
-                                @fragment fn fsMain() -> @location(0) vec4<f32> {
-                                    return vec4<f32>(0.0, 1.0, 0.0, 1.0);
-                                }
-                            """.trimIndent()
-                            )
-                        )
-                    )
-                    shaderModule = newShaderModule
-                    val newPipelineLayout = device.createPipelineLayout(GPUPipelineLayoutDescriptor())
-                    pipelineLayout = newPipelineLayout
-                    currentPipeline = device.createRenderPipeline(
-                        GPURenderPipelineDescriptor(
-                            layout = newPipelineLayout,
-                            vertex = GPUVertexState(module = newShaderModule, entryPoint = "vsMain"),
-                            fragment = GPUFragmentState(
-                                module = newShaderModule,
-                                entryPoint = "fsMain",
-                                targets = arrayOf(GPUColorTargetState(format = texture.format))
-                            ),
-                            primitive = GPUPrimitiveState(topology = PrimitiveTopology.TriangleList)
-                        )
-                    )
-                    pipeline = currentPipeline
-                }
+        var fenceFd: Int
+        try {
+            val encoder = device.createCommandEncoder(GPUCommandEncoderDescriptor())
 
-                val encoder = device.createCommandEncoder(GPUCommandEncoderDescriptor())
+            val red = presentationTimeUs / 2_000_000.0
+            val blue = 1.0 - red
+            val colorAttachment = GPURenderPassColorAttachment(
+                clearValue = GPUColor(red, 0.0, blue, 0.0), // Ignored for LoadOp.Load
+                view = texture.createView(GPUTextureViewDescriptor()),
+                loadOp = LoadOp.Clear, // Preserves the input frame drawn by HardwareBufferRenderer
+                storeOp = StoreOp.Store
+            )
 
-                val colorAttachment = GPURenderPassColorAttachment(
-                    clearValue = GPUColor(0.0, 0.0, 0.0, 0.0), // Ignored for LoadOp.Load
-                    view = texture.createView(GPUTextureViewDescriptor()),
-                    loadOp = LoadOp.Load, // Preserves the input frame drawn by HardwareBufferRenderer
-                    storeOp = StoreOp.Store
-                )
+            val passDesc = GPURenderPassDescriptor(
+                colorAttachments = arrayOf(colorAttachment)
+            )
 
-                val passDesc = GPURenderPassDescriptor(
-                    colorAttachments = arrayOf(colorAttachment)
-                )
+            val pass = encoder.beginRenderPass(passDesc)
+            pass.end()
 
-                val pass = encoder.beginRenderPass(passDesc)
-                pass.setPipeline(currentPipeline!!)
-                // Draw only on the left half of the buffer.
-                pass.setViewport(
-                    0f,
-                    0f,
-                    hardwareBuffer.width / 2f,
-                    hardwareBuffer.height.toFloat(),
-                    0f,
-                    1f
-                )
-                pass.setScissorRect(0, 0, hardwareBuffer.width / 2, hardwareBuffer.height)
-                pass.draw(3)
-                pass.end()
+            val commandBuffer = encoder.finish()
+            device.queue.submit(arrayOf(commandBuffer))
+            fenceFd = nativeUnlockHardwareBuffer(texture, memory)
 
-                val commandBuffer = encoder.finish()
-                device.queue.submit(arrayOf(commandBuffer))
-
-                // Clean up resources used in this frame
-                commandBuffer.close()
-                encoder.close()
-                colorAttachment.view!!.close()
-                pass.close()
-                null // Placeholder, fence is returned from Unlock
-            } finally {
-                // Unlock and release native resources (memory and fence created in Lock).
-                // texture is closed by .use block, but we pass it to EndAccess first.
-                val outFenceFd = nativeUnlockHardwareBuffer(texture, memory, sharedFence)
-                if (outFenceFd >= 0) {
-                    return@use SyncFenceCompat.adoptFenceFileDescriptor(outFenceFd)
-                }
-            }
-            null
+            // Clean up resources used in this frame
+            commandBuffer.close()
+            encoder.close()
+            colorAttachment.view!!.close()
+            pass.close()
+        } finally {
         }
+        return fenceFd
     }
 
     private suspend fun getOutputFrame(inputFrame: HardwareBufferFrame): HardwareBufferFrame {
@@ -297,7 +241,7 @@ class HardwareBufferEffectsPipeline :
                 )
                 .setUsageFlags(
                     HardwareBuffer.USAGE_GPU_COLOR_OUTPUT or HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE
-                        or HardwareBuffer.USAGE_CPU_WRITE_OFTEN
+                            or HardwareBuffer.USAGE_CPU_WRITE_OFTEN
                 )
                 .setColorInfo(inputFrame.format.colorInfo ?: SDR_BT709_LIMITED)
                 .build()
@@ -376,17 +320,16 @@ class HardwareBufferEffectsPipeline :
     private external fun nativeLockHardwareBuffer(
         deviceHandle: Long,
         hardwareBuffer: HardwareBuffer,
-        fenceFd: Int
     ): Array<Any>
 
     private external fun nativeUnlockHardwareBuffer(
         texture: GPUTexture?,
-        memory: Any,
-        fence: Any?
+        memory: Any
     ): Int
 
     companion object {
         private const val TAG = "DefaultHBEffects"
+
         // It can take multiple seconds for the encoder to be configured and the first frame to be
         // encoded.
         private const val TIMEOUT_MS = 10_000L

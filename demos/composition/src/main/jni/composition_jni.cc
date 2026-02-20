@@ -18,33 +18,13 @@
 
 extern "C" JNIEXPORT jobjectArray JNICALL
 Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativeLockHardwareBuffer(
-    JNIEnv* env, jobject thiz, jlong deviceHandle, jobject hardwareBuffer, jint fenceFd) {
+    JNIEnv* env, jobject thiz, jlong deviceHandle, jobject hardwareBuffer) {
   
   WGPUDevice device = reinterpret_cast<WGPUDevice>(deviceHandle);
   AHardwareBuffer* hb = AHardwareBuffer_fromHardwareBuffer(env, hardwareBuffer);
   if (!hb) {
     LOGE("Failed to get AHardwareBuffer from jobject");
-    if (fenceFd >= 0) close(fenceFd);
     return nullptr;
-  }
-
-  WGPUSharedFence sharedFence = nullptr;
-  if (fenceFd >= 0) {
-    int dupFd = dup(fenceFd);
-    WGPUSharedFenceSyncFDDescriptor syncFdDesc = {};
-    syncFdDesc.chain.sType = WGPUSType_SharedFenceSyncFDDescriptor;
-    syncFdDesc.handle = dupFd;
-
-    WGPUSharedFenceDescriptor fenceDesc = {};
-    fenceDesc.nextInChain = &syncFdDesc.chain;
-
-    sharedFence = wgpuDeviceImportSharedFence(device, &fenceDesc);
-    if (!sharedFence) {
-        LOGE("Failed to import SharedFence");
-        close(dupFd);
-    }
-    // We are responsible for closing the original FD passed from Java.
-    close(fenceFd);
   }
 
   WGPUSharedTextureMemoryAHardwareBufferDescriptor stmAHardwareBufferDesc = {};
@@ -58,14 +38,12 @@ Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativ
   WGPUSharedTextureMemory memory = wgpuDeviceImportSharedTextureMemory(device, &stmDesc);
   if (!memory) {
       LOGE("Failed to import SharedTextureMemory");
-      if (sharedFence) wgpuSharedFenceRelease(sharedFence);
       return nullptr;
   }
 
   WGPUTexture texture = wgpuSharedTextureMemoryCreateTexture(memory, nullptr);
   if (!texture) {
       LOGE("Failed to create texture from SharedTextureMemory");
-      if (sharedFence) wgpuSharedFenceRelease(sharedFence);
       wgpuSharedTextureMemoryRelease(memory);
       return nullptr;
   }
@@ -77,16 +55,8 @@ Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativ
   beginLayout.newLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   beginDesc.nextInChain = &beginLayout.chain;
 
-  uint64_t signaledValue = 1; // Binary fences expect 1 as the signaled value.
-  if (sharedFence) {
-      beginDesc.fenceCount = 1;
-      beginDesc.fences = &sharedFence;
-      beginDesc.signaledValues = &signaledValue;
-  }
-  
   if (!wgpuSharedTextureMemoryBeginAccess(memory, texture, &beginDesc)) {
       LOGE("Failed to begin access to SharedTextureMemory");
-      if (sharedFence) wgpuSharedFenceRelease(sharedFence);
       wgpuTextureRelease(texture);
       wgpuSharedTextureMemoryRelease(memory);
       return nullptr;
@@ -95,13 +65,11 @@ Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativ
   if (env->ExceptionCheck()) {
     wgpuTextureRelease(texture);
     wgpuSharedTextureMemoryRelease(memory);
-    if (sharedFence) wgpuSharedFenceRelease(sharedFence);
     return nullptr;
   }
 
   jobject textureObj = nullptr;
   jobject memoryObj = nullptr;
-  jobject fenceObj = nullptr;
   jobjectArray result = nullptr;
 
   jclass textureClass = env->FindClass("androidx/webgpu/GPUTexture");
@@ -131,18 +99,12 @@ Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativ
           goto error_after_begin;
       }
 
-      if (sharedFence) {
-          fenceObj = env->CallStaticObjectMethod(longClass, valueOf, reinterpret_cast<jlong>(sharedFence));
-          if (env->ExceptionCheck()) goto error_after_begin;
-      }
-
-      result = env->NewObjectArray(3, env->FindClass("java/lang/Object"), nullptr);
+      result = env->NewObjectArray(2, env->FindClass("java/lang/Object"), nullptr);
       if (env->ExceptionCheck()) {
           goto error_after_begin;
       }
       env->SetObjectArrayElement(result, 0, textureObj);
       env->SetObjectArrayElement(result, 1, memoryObj);
-      env->SetObjectArrayElement(result, 2, fenceObj);
 
       return result;
   }
@@ -156,7 +118,6 @@ error_after_begin:
       endLayout.newLayout = VK_IMAGE_LAYOUT_UNDEFINED;
       endState.nextInChain = &endLayout.chain;
       wgpuSharedTextureMemoryEndAccess(memory, texture, &endState);
-      if (sharedFence) wgpuSharedFenceRelease(sharedFence);
       wgpuTextureRelease(texture);
       wgpuSharedTextureMemoryRelease(memory);
       return nullptr;
@@ -165,7 +126,7 @@ error_after_begin:
 
 extern "C" JNIEXPORT jint JNICALL
 Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativeUnlockHardwareBuffer(
-    JNIEnv* env, jobject thiz, jobject textureObj, jobject memoryLongObj, jobject fenceLongObj) {
+    JNIEnv* env, jobject thiz, jobject textureObj, jobject memoryLongObj) {
   
   if (!memoryLongObj) return -1;
 
@@ -184,7 +145,7 @@ Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativ
       }
   }
 
-  int outFenceFd = -1;
+  int fenceFd = -1;
   if (texture) {
       WGPUSharedTextureMemoryEndAccessState endState = {};
       WGPUSharedTextureMemoryVkImageLayoutEndState endLayout{};
@@ -195,32 +156,24 @@ Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativ
 
       if (wgpuSharedTextureMemoryEndAccess(memory, texture, &endState)) {
           if (endState.fenceCount > 0) {
+              WGPUSharedFenceExportInfo exportInfo = {};
               WGPUSharedFenceSyncFDExportInfo syncFdExportInfo = {};
               syncFdExportInfo.chain.sType = WGPUSType_SharedFenceSyncFDExportInfo;
-              
-              WGPUSharedFenceExportInfo exportInfo = {};
               exportInfo.nextInChain = &syncFdExportInfo.chain;
-              
+
+              // We only support one fence for now, or we could merge them if needed.
               wgpuSharedFenceExportInfo(endState.fences[0], &exportInfo);
-              if (syncFdExportInfo.handle >= 0) {
-                  outFenceFd = dup(syncFdExportInfo.handle);
-              }
+              fenceFd = dup(syncFdExportInfo.handle);
           }
           wgpuSharedTextureMemoryEndAccessStateFreeMembers(endState);
       } else {
           LOGE("Failed to end access to SharedTextureMemory");
       }
+      wgpuTextureRelease(texture);
   }
 
   // Release the memory here as it was created in nativeLockHardwareBuffer and is not managed by Java.
   wgpuSharedTextureMemoryRelease(memory);
 
-  // Release the fence if one was provided.
-  if (fenceLongObj) {
-      WGPUSharedFence sharedFence = reinterpret_cast<WGPUSharedFence>(env->CallLongMethod(fenceLongObj, longValue));
-      if (sharedFence) {
-          wgpuSharedFenceRelease(sharedFence);
-      }
-  }
-  return outFenceFd;
+  return fenceFd;
 }

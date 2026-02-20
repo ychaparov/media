@@ -81,16 +81,6 @@ public class SyncFenceCompat implements AutoCloseable {
     return Os.poll(structPollfds, timeoutMs) == 1;
   }
 
-  /**
-   * Detaches the file descriptor from this instance. The caller (or the recipient of the returned
-   * file descriptor) is responsible for closing it.
-   *
-   * @return The detached file descriptor.
-   */
-  public int detachFd() {
-    return parcelFileDescriptor.detachFd();
-  }
-
   @Override
   public void close() throws IOException {
     parcelFileDescriptor.close();
