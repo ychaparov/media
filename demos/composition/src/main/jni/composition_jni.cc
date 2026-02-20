@@ -23,25 +23,32 @@ bool InitializeWebGPU() {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (device) return true;
 
-    instance = wgpu::CreateInstance();
+    // Enable TimedWaitAny to allow blocking WaitAny calls.
+    wgpu::InstanceFeatureName instanceFeatures[] = {wgpu::InstanceFeatureName::TimedWaitAny};
+    wgpu::InstanceDescriptor instanceDesc = {};
+    instanceDesc.requiredFeatureCount = 1;
+    instanceDesc.requiredFeatures = instanceFeatures;
+
+    instance = wgpu::CreateInstance(&instanceDesc);
     if (!instance) {
         LOGE("Failed to create WebGPU instance");
         return false;
     }
 
     wgpu::Adapter adapter;
-    instance.RequestAdapter(
+    wgpu::Future adapterFuture = instance.RequestAdapter(
         nullptr,
-        wgpu::CallbackMode::AllowSpontaneous,
+        wgpu::CallbackMode::WaitAnyOnly,
         [](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message, wgpu::Adapter* userdata) {
             if (status == wgpu::RequestAdapterStatus::Success) {
                 *userdata = std::move(adapter);
             } else {
-                LOGE("Failed to request adapter: %s", message.data ? message.data : "unknown error");
+                LOGE("Failed to request adapter: %.*s", static_cast<int>(message.length), message.data);
             }
         },
         &adapter);
 
+    instance.WaitAny(adapterFuture, UINT64_MAX);
     if (!adapter) return false;
 
     std::vector<wgpu::FeatureName> features;
@@ -65,18 +72,19 @@ bool InitializeWebGPU() {
             LOGE("WebGPU Uncaptured Error: %.*s", static_cast<int>(message.length), message.data);
         });
 
-    adapter.RequestDevice(
+    wgpu::Future deviceFuture = adapter.RequestDevice(
         &deviceDesc,
-        wgpu::CallbackMode::AllowSpontaneous,
+        wgpu::CallbackMode::WaitAnyOnly,
         [](wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message, wgpu::Device* userdata) {
             if (status == wgpu::RequestDeviceStatus::Success) {
                 *userdata = std::move(device);
             } else {
-                LOGE("Failed to request device: %s", message.data ? message.data : "unknown error");
+                LOGE("Failed to request device: %.*s", static_cast<int>(message.length), message.data);
             }
         },
         &device);
 
+    instance.WaitAny(deviceFuture, UINT64_MAX);
     if (!device) return false;
 
     return true;
@@ -148,10 +156,20 @@ Java_androidx_media3_demo_composition_effect_HardwareBufferEffectsPipeline_nativ
 
   device.GetQueue().Submit(1, &commandBuffer);
 
+  wgpu::Future future = device.GetQueue().OnSubmittedWorkDone(
+      wgpu::CallbackMode::WaitAnyOnly,
+      [](wgpu::QueueWorkDoneStatus status, wgpu::StringView message) {
+          if (status != wgpu::QueueWorkDoneStatus::Success) {
+              LOGE("OnSubmittedWorkDone failed: %.*s", static_cast<int>(message.length), message.data);
+          }
+      });
+
   wgpu::SharedTextureMemoryEndAccessState endState = {};
   wgpu::SharedTextureMemoryVkImageLayoutEndState endLayout{};
   endState.nextInChain = &endLayout;
   if (!memory.EndAccess(texture, &endState)) {
       LOGE("Failed to end access to SharedTextureMemory");
   }
+
+  instance.WaitAny(future, UINT64_MAX);
 }
