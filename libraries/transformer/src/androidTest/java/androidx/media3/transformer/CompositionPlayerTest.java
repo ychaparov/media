@@ -837,7 +837,7 @@ public class CompositionPlayerTest {
     instrumentation.runOnMainSync(
         () -> {
           DefaultHardwareBufferEffectsPipeline packetProcessor =
-              new DefaultHardwareBufferEffectsPipeline();
+              new DefaultHardwareBufferEffectsPipeline(context);
           compositionPlayer =
               new CompositionPlayer.Builder(applicationContext)
                   .setHardwareBufferEffectsPipeline(packetProcessor)

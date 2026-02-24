@@ -15,6 +15,7 @@
  */
 package androidx.media3.demo.transformer;
 
+import static android.Manifest.permission.CAMERA;
 import static android.Manifest.permission.READ_EXTERNAL_STORAGE;
 import static android.Manifest.permission.READ_MEDIA_VIDEO;
 import static android.os.Build.VERSION.SDK_INT;
@@ -379,6 +380,11 @@ public final class ConfigurationActivity extends AppCompatActivity {
   }
 
   private void startExport() {
+    if (enablePacketProcessorCheckBox.isChecked()
+        && ActivityCompat.checkSelfPermission(this, CAMERA) != PackageManager.PERMISSION_GRANTED) {
+      ActivityCompat.requestPermissions(this, new String[] {CAMERA}, /* requestCode= */ 0);
+      return;
+    }
     Intent transformerIntent = new Intent(/* packageContext= */ this, TransformerActivity.class);
     Bundle bundle = new Bundle();
     bundle.putBoolean(SHOULD_REMOVE_AUDIO, removeAudioCheckbox.isChecked());

@@ -150,13 +150,22 @@ class CompositionPreviewActivity : AppCompatActivity() {
     }
 
     // Request permission in case the file is local. This is for manual testing only.
-    val permission =
-      if (SDK_INT >= 33) Manifest.permission.READ_MEDIA_VIDEO
-      else Manifest.permission.READ_EXTERNAL_STORAGE
-    if (ActivityCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+    val permissions = mutableListOf<String>()
+    if (SDK_INT >= 33) {
+      permissions.add(Manifest.permission.READ_MEDIA_VIDEO)
+    } else {
+      permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
+    }
+    permissions.add(Manifest.permission.CAMERA)
+
+    val permissionsToRequest = permissions.filter {
+      ActivityCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+    }.toTypedArray()
+
+    if (permissionsToRequest.isNotEmpty()) {
       ActivityCompat.requestPermissions(
         this,
-        /* permissions= */ arrayOf(permission),
+        /* permissions= */ permissionsToRequest,
         /* requestCode= */ 1,
       )
     }
@@ -164,6 +173,7 @@ class CompositionPreviewActivity : AppCompatActivity() {
     val viewModel: CompositionPreviewViewModel by viewModels {
       CompositionPreviewViewModelFactory(application)
     }
+    viewModel.setLifecycleOwner(this)
 
     setContent {
       val uiState by viewModel.uiState.collectAsStateWithLifecycle()

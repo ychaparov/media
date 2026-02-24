@@ -91,7 +91,7 @@ public final class TransformerParameterizedPacketConsumerAndroidTest {
         /* outputFormat= */ testConfig.getVideoEncoderInputFormat());
     Transformer transformer =
         NdkTransformerBuilder.create(context)
-            .setHardwareBufferEffectsPipeline(new DefaultHardwareBufferEffectsPipeline())
+            .setHardwareBufferEffectsPipeline(new DefaultHardwareBufferEffectsPipeline(context))
             .build();
 
     ExportTestResult result =

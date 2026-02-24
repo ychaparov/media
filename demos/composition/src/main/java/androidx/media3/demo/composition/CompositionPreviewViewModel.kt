@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size as geometrySize
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -104,6 +105,12 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
   val uiState: StateFlow<CompositionPreviewState> = _uiState.asStateFlow()
 
   var compositionPlayer by mutableStateOf(createCompositionPlayer())
+  private val packetProcessor = DefaultHardwareBufferEffectsPipeline(getApplication())
+
+  fun setLifecycleOwner(lifecycleOwner: LifecycleOwner) {
+    packetProcessor?.setLifecycleOwner(lifecycleOwner)
+  }
+
   val EXPORT_ERROR_MESSAGE = application.resources.getString(R.string.export_error)
   val EXPORT_STARTED_MESSAGE = application.resources.getString(R.string.export_started)
   internal var frameConsumerEnabled: Boolean = false
@@ -496,7 +503,7 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
         NdkTransformerBuilder.create(getApplication())
           .setHardwareBufferEffectsPipeline(
             // TODO: b/449957627 - Implement HardwareBuffer compositing.
-            DefaultHardwareBufferEffectsPipeline()
+            DefaultHardwareBufferEffectsPipeline(getApplication())
           )
       } else {
         Transformer.Builder(/* context= */ getApplication())
@@ -775,7 +782,9 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
     frameConsumerEnabled = uiState.value.outputSettingsState.frameConsumerEnabled
     if (uiState.value.outputSettingsState.frameConsumerEnabled && SDK_INT >= 34) {
       playerBuilder = NdkCompositionPlayerBuilder.create(getApplication())
-      playerBuilder.setHardwareBufferEffectsPipeline(DefaultHardwareBufferEffectsPipeline())
+//      val pipeline = DefaultHardwareBufferEffectsPipeline(getApplication())
+//      this.packetProcessor = pipeline
+      playerBuilder.setHardwareBufferEffectsPipeline(packetProcessor)
       playerBuilder.setGlThreadExecutorService(glExecutorService)
     } else {
       playerBuilder = CompositionPlayer.Builder(getApplication())

@@ -203,11 +203,11 @@ public final class TranscodeQualityTest {
   private static Transformer.Builder createBuilder(Context context, String mode) {
     if (mode.equals(PACKET_CONSUMER_NDK)) {
       return NdkTransformerBuilder.create(context)
-          .setHardwareBufferEffectsPipeline(new DefaultHardwareBufferEffectsPipeline());
+          .setHardwareBufferEffectsPipeline(new DefaultHardwareBufferEffectsPipeline(context));
     }
     if (mode.equals(PACKET_CONSUMER)) {
       return new Transformer.Builder(context)
-          .setHardwareBufferEffectsPipeline(new DefaultHardwareBufferEffectsPipeline());
+          .setHardwareBufferEffectsPipeline(new DefaultHardwareBufferEffectsPipeline(context));
     }
     return new Transformer.Builder(context);
   }

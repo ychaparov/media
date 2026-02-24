@@ -1,0 +1,3 @@
+[submodule "androidx"]
+	path = androidx
+	url = https://github.com/androidx/androidx.git

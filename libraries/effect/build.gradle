@@ -47,6 +47,9 @@ android {
 dependencies {
     implementation 'androidx.annotation:annotation:' + androidxAnnotationVersion
     implementation 'androidx.concurrent:concurrent-futures:' + androidxConcurrentFuturesVersion
+    api 'androidx.camera:camera-core:' + androidxCameraVersion
+    api 'androidx.camera:camera-camera2:' + androidxCameraVersion
+    api 'androidx.camera:camera-lifecycle:' + androidxCameraVersion
     api project(modulePrefix + 'lib-common')
     implementation project(modulePrefix + 'lib-datasource')
     implementation "org.jetbrains.kotlinx:kotlinx-coroutines-guava:" + kotlinxCoroutinesVersion

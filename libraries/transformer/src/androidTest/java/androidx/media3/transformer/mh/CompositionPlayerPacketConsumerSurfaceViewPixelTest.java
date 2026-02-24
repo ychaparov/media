@@ -134,7 +134,7 @@ public class CompositionPlayerPacketConsumerSurfaceViewPixelTest {
     instrumentation.runOnMainSync(
         () -> {
           DefaultHardwareBufferEffectsPipeline packetProcessor =
-              new DefaultHardwareBufferEffectsPipeline();
+              new DefaultHardwareBufferEffectsPipeline(context);
           compositionPlayer =
               new CompositionPlayer.Builder(context)
                   .setHardwareBufferEffectsPipeline(packetProcessor)
@@ -181,7 +181,7 @@ public class CompositionPlayerPacketConsumerSurfaceViewPixelTest {
     instrumentation.runOnMainSync(
         () -> {
           DefaultHardwareBufferEffectsPipeline packetProcessor =
-              new DefaultHardwareBufferEffectsPipeline();
+              new DefaultHardwareBufferEffectsPipeline(context);
           compositionPlayer =
               new CompositionPlayer.Builder(context)
                   .setHardwareBufferEffectsPipeline(packetProcessor)
@@ -242,7 +242,7 @@ public class CompositionPlayerPacketConsumerSurfaceViewPixelTest {
     instrumentation.runOnMainSync(
         () -> {
           DefaultHardwareBufferEffectsPipeline packetProcessor =
-              new DefaultHardwareBufferEffectsPipeline();
+              new DefaultHardwareBufferEffectsPipeline(context);
           compositionPlayer =
               new CompositionPlayer.Builder(context)
                   .setHardwareBufferEffectsPipeline(packetProcessor)
@@ -313,7 +313,7 @@ public class CompositionPlayerPacketConsumerSurfaceViewPixelTest {
         () -> {
           compositionPlayer =
               new CompositionPlayer.Builder(context)
-                  .setHardwareBufferEffectsPipeline(new DefaultHardwareBufferEffectsPipeline())
+                  .setHardwareBufferEffectsPipeline(new DefaultHardwareBufferEffectsPipeline(context))
                   .build();
           compositionPlayer.setVideoSurfaceHolder(surfaceHolder);
           compositionPlayer.addListener(listener);
@@ -356,7 +356,7 @@ public class CompositionPlayerPacketConsumerSurfaceViewPixelTest {
         () -> {
           compositionPlayer =
               new CompositionPlayer.Builder(context)
-                  .setHardwareBufferEffectsPipeline(new DefaultHardwareBufferEffectsPipeline())
+                  .setHardwareBufferEffectsPipeline(new DefaultHardwareBufferEffectsPipeline(context))
                   .build();
           compositionPlayer.setVideoSurfaceHolder(surfaceHolder);
           compositionPlayer.addListener(listener);

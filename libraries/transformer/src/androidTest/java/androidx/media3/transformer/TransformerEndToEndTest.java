@@ -2332,7 +2332,7 @@ public class TransformerEndToEndTest {
     EditedMediaItem editedMediaItem = new EditedMediaItem.Builder(mediaItem).build();
     Transformer transformer =
         NdkTransformerBuilder.create(context)
-            .setHardwareBufferEffectsPipeline(new DefaultHardwareBufferEffectsPipeline())
+            .setHardwareBufferEffectsPipeline(new DefaultHardwareBufferEffectsPipeline(context))
             .setVideoMimeType(MimeTypes.VIDEO_AV1)
             .build();
 

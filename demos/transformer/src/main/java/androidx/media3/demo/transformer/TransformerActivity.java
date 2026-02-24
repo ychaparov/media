@@ -370,7 +370,7 @@ public final class TransformerActivity extends AppCompatActivity {
         throw new IllegalStateException("API version 34+ required to export with PacketProcessor");
       }
       transformerBuilder.setHardwareBufferEffectsPipeline(
-          new DefaultHardwareBufferEffectsPipeline());
+          new DefaultHardwareBufferEffectsPipeline(/* context= */ this));
     }
     transformerBuilder.addListener(
         new Transformer.Listener() {
