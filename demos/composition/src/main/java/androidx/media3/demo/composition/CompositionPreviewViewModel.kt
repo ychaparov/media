@@ -58,6 +58,7 @@ import androidx.media3.demo.composition.data.PlacedOverlay
 import androidx.media3.demo.composition.data.PlacementState
 import androidx.media3.demo.composition.effect.LottieEffectFactory
 import androidx.media3.effect.BitmapOverlay
+import androidx.media3.effect.CameraSideBySideEffect
 import androidx.media3.effect.DebugTraceUtil
 import androidx.media3.effect.DefaultHardwareBufferEffectsPipeline
 import androidx.media3.effect.LanczosResample
@@ -106,9 +107,11 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
 
   var compositionPlayer by mutableStateOf(createCompositionPlayer())
   private val packetProcessor = DefaultHardwareBufferEffectsPipeline(getApplication())
+  private val cameraSideBySideEffect = CameraSideBySideEffect(getApplication())
 
   fun setLifecycleOwner(lifecycleOwner: LifecycleOwner) {
-    packetProcessor?.setLifecycleOwner(lifecycleOwner)
+    packetProcessor.setLifecycleOwner(lifecycleOwner)
+    cameraSideBySideEffect.setLifecycleOwner(lifecycleOwner)
   }
 
   val EXPORT_ERROR_MESSAGE = application.resources.getString(R.string.export_error)
@@ -684,6 +687,10 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
     }
 
     finalVideoEffects.addAll(overlayEffectList)
+
+    if (!frameConsumerEnabled) {
+      finalVideoEffects.add(cameraSideBySideEffect)
+    }
 
     return Composition.Builder(videoSequences)
       .setEffects(

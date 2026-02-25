@@ -29,6 +29,7 @@
     <item>Custom Bitmap Overlay</item>
     <item>Custom Text Overlay</item>
     <item>Animated logo</item>
+    <item>Camera overlay</item>
   </string-array>
   <string-array name="audio_effects_names">
     <item>High pitched</item>

@@ -74,6 +74,7 @@ import androidx.media3.common.util.Log;
 import androidx.media3.common.util.Util;
 import androidx.media3.datasource.DataSourceBitmapLoader;
 import androidx.media3.effect.BitmapOverlay;
+import androidx.media3.effect.CameraOverlay;
 import androidx.media3.effect.Contrast;
 import androidx.media3.effect.DebugTraceUtil;
 import androidx.media3.effect.DefaultHardwareBufferEffectsPipeline;
@@ -751,6 +752,19 @@ public final class TransformerActivity extends AppCompatActivity {
     }
     if (selectedEffects[ConfigurationActivity.ANIMATING_LOGO_OVERLAY]) {
       overlaysBuilder.add(new AnimatedLogoOverlay(this.getApplicationContext()));
+    }
+    if (selectedEffects[ConfigurationActivity.CAMERA_OVERLAY_INDEX]) {
+      CameraOverlay cameraOverlay =
+          new CameraOverlay(this) {
+            @Override
+            public StaticOverlaySettings getOverlaySettings(long presentationTimeUs) {
+              return new StaticOverlaySettings.Builder()
+                  .setScale(0.5f, 0.5f)
+                  .setBackgroundFrameAnchor(0.5f, 0.5f)
+                  .build();
+            }
+          };
+      overlaysBuilder.add(cameraOverlay);
     }
 
     ImmutableList<TextureOverlay> overlays = overlaysBuilder.build();

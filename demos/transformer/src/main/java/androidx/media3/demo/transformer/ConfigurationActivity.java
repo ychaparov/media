@@ -120,6 +120,7 @@ public final class ConfigurationActivity extends AppCompatActivity {
   public static final int BITMAP_OVERLAY_INDEX = 11;
   public static final int TEXT_OVERLAY_INDEX = 12;
   public static final int ANIMATING_LOGO_OVERLAY = 13;
+  public static final int CAMERA_OVERLAY_INDEX = 14;
 
   // Audio effect selections.
   public static final int HIGH_PITCHED_INDEX = 0;
@@ -380,7 +381,8 @@ public final class ConfigurationActivity extends AppCompatActivity {
   }
 
   private void startExport() {
-    if (enablePacketProcessorCheckBox.isChecked()
+    if ((enablePacketProcessorCheckBox.isChecked()
+            || videoEffectsSelections[CAMERA_OVERLAY_INDEX])
         && ActivityCompat.checkSelfPermission(this, CAMERA) != PackageManager.PERMISSION_GRANTED) {
       ActivityCompat.requestPermissions(this, new String[] {CAMERA}, /* requestCode= */ 0);
       return;
