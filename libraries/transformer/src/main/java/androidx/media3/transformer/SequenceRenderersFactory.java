@@ -1029,22 +1029,21 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
         boolean isLastBuffer,
         Format format)
         throws ExoPlaybackException {
+      checkNotNull(codec);
+
+      long outputStreamOffsetUs = getOutputStreamOffsetUs();
+      long presentationTimeUs = bufferPresentationTimeUs - outputStreamOffsetUs;
+      if (isDecodeOnlyBuffer) {
+        skipOutputBuffer(codec, bufferIndex, presentationTimeUs);
+        return true;
+      }
       if (!hardwareBufferFrameReader.canAcceptFrameViaSurface()) {
         return false;
       }
       nextFormat = format;
-      return super.processOutputBuffer(
-          positionUs,
-          elapsedRealtimeUs,
-          codec,
-          buffer,
-          bufferIndex,
-          bufferFlags,
-          sampleCount,
-          bufferPresentationTimeUs,
-          isDecodeOnlyBuffer,
-          isLastBuffer,
-          format);
+      long releaseTimeNs = getClock().nanoTime();
+      renderOutputBufferV21(codec, bufferIndex, presentationTimeUs, releaseTimeNs);
+      return true;
     }
 
     @Override

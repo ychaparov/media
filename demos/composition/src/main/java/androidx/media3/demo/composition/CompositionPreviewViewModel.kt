@@ -572,6 +572,9 @@ class CompositionPreviewViewModel(application: Application) : AndroidViewModel(a
     val videoSequences = mutableListOf<EditedMediaItemSequence>()
     for (sequenceIndex in 0 until numSequences) {
       var hasItem = false
+      if (sequenceIndex == 1) {
+        videoSequenceBuilders[sequenceIndex].addGap(5_000_000)
+      }
       for (item in sequenceIndex until editedMediaItems.size step numSequences) {
         hasItem = true
         Log.d(TAG, "Adding item $item to sequence $sequenceIndex")
