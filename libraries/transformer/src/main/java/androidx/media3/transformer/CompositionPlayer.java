@@ -592,6 +592,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
   private static final String TAG = "CompositionPlayer";
   private static final String BLANK_FRAMES_MEDIA_SOURCE_TYPE = "composition_player_blank_frames";
   private static final long SURFACE_DESTROY_TIMEOUT_MS = 2_000;
+  private static final long SCRUBBING_SEEK_TIMEOUT_MS = 500;
 
   private final Context context;
   private final Clock clock;
@@ -609,6 +610,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
   private final long lateThresholdToDropInputUs;
   private final AudioFocusManager audioFocusManager;
   private final InternalListener internalListener;
+  private final Runnable scrubbingSeekTimeoutRunnable;
   @Nullable private final CompositionVideoPacketReleaseControl videoPacketReleaseControl;
   @Nullable private final PacketConsumer<ImmutableList<HardwareBufferFrame>> packetConsumer;
 
@@ -661,6 +663,8 @@ public final class CompositionPlayer extends SimpleBasePlayer {
   // Whether prepare() needs to be called to prepare the underlying sequence players.
   private boolean appNeedsToPrepareCompositionPlayer;
   private boolean playWhenReadyBeforeScrubbingEnabled;
+  private long pendingScrubbingSeekPositionMs;
+  private boolean waitingForFrameAfterScrubbingSeek;
   private AudioAttributes audioAttributes;
   private boolean handleAudioFocus;
 
@@ -692,6 +696,8 @@ public final class CompositionPlayer extends SimpleBasePlayer {
     audioAttributes = builder.audioAttributes;
     handleAudioFocus = builder.handleAudioFocus;
     appNeedsToPrepareCompositionPlayer = true;
+    pendingScrubbingSeekPositionMs = C.TIME_UNSET;
+    scrubbingSeekTimeoutRunnable = this::handleFrameRendered;
     internalListener = new InternalListener();
     audioFocusManager =
         new AudioFocusManager(
@@ -846,6 +852,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
    * @param scrubbingModeEnabled Whether scrubbing mode should be enabled.
    */
   public void setScrubbingModeEnabled(boolean scrubbingModeEnabled) {
+    Log.d(TAG, "setScrubbingModeEnabled: " + scrubbingModeEnabled);
     verifyApplicationThread();
     if (this.scrubbingModeEnabled == scrubbingModeEnabled) {
       return;
@@ -853,6 +860,10 @@ public final class CompositionPlayer extends SimpleBasePlayer {
     this.scrubbingModeEnabled = scrubbingModeEnabled;
     if (scrubbingModeEnabled) {
       this.playWhenReadyBeforeScrubbingEnabled = this.playWhenReady;
+    } else {
+      pendingScrubbingSeekPositionMs = C.TIME_UNSET;
+      waitingForFrameAfterScrubbingSeek = false;
+      applicationHandler.removeCallbacks(scrubbingSeekTimeoutRunnable);
     }
 
     for (int i = 0; i < playerHolders.size(); i++) {
@@ -1106,7 +1117,41 @@ public final class CompositionPlayer extends SimpleBasePlayer {
   @Override
   protected ListenableFuture<?> handleSeek(
       int mediaItemIndex, long positionMs, @Command int seekCommand) {
+    Log.d(TAG, "handleSeek: positionMs=" + positionMs + ", scrubbing=" + scrubbingModeEnabled);
     resetLivePositionSuppliers();
+    if (scrubbingModeEnabled && packetConsumer != null) {
+      if (waitingForFrameAfterScrubbingSeek) {
+        Log.d(TAG, "handleSeek: PENDING positionMs=" + positionMs);
+        pendingScrubbingSeekPositionMs = positionMs;
+      } else {
+        performSeekInternal(positionMs);
+        waitingForFrameAfterScrubbingSeek = true;
+      }
+    } else {
+      performSeekInternal(positionMs);
+    }
+    return Futures.immediateVoidFuture();
+  }
+
+  private void handleFrameRendered() {
+    Log.d(TAG, "handleFrameRendered: waiting=" + waitingForFrameAfterScrubbingSeek + ", pendingMs=" + pendingScrubbingSeekPositionMs);
+    applicationHandler.removeCallbacks(scrubbingSeekTimeoutRunnable);
+    if (waitingForFrameAfterScrubbingSeek) {
+      waitingForFrameAfterScrubbingSeek = false;
+      if (pendingScrubbingSeekPositionMs != C.TIME_UNSET) {
+        long positionMs = pendingScrubbingSeekPositionMs;
+        pendingScrubbingSeekPositionMs = C.TIME_UNSET;
+        performSeekInternal(positionMs);
+        waitingForFrameAfterScrubbingSeek = true;
+      }
+    }
+  }
+
+  private void performSeekInternal(long positionMs) {
+    Log.d(TAG, "performSeekInternal: positionMs=" + positionMs);
+    if (scrubbingModeEnabled && packetConsumer != null) {
+      applicationHandler.postDelayed(scrubbingSeekTimeoutRunnable, SCRUBBING_SEEK_TIMEOUT_MS);
+    }
     DebugTraceUtil.logEvent(
         COMPONENT_COMPOSITION_PLAYER,
         EVENT_SEEK_TO,
@@ -1137,7 +1182,6 @@ public final class CompositionPlayer extends SimpleBasePlayer {
       playerHolders.get(i).player.seekTo(positionMs);
     }
     compositionPlayerInternal.endSeek();
-    return Futures.immediateVoidFuture();
   }
 
   @Override
@@ -1466,6 +1510,9 @@ public final class CompositionPlayer extends SimpleBasePlayer {
             internalListener,
             compositionInternalListenerHandler,
             videoPacketReleaseControl);
+    if (videoPacketReleaseControl != null) {
+      videoPacketReleaseControl.setInternalPlayer(compositionPlayerInternal);
+    }
     setVolumeInternal(volume);
     compositionPlayerInternalPrepared = true;
   }
@@ -2372,6 +2419,11 @@ public final class CompositionPlayer extends SimpleBasePlayer {
       analyticsCollector.onDroppedFrames(droppedFrameCount, elapsedMs);
     }
 
+    @Override
+    public void onVideoFrameAboutToBeRendered() {
+      handleFrameRendered();
+    }
+
     // SurfaceHolder.Callback methods. Called on application thread.
 
     @Override
@@ -2398,6 +2450,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
       applicationHandler.post(
           () -> {
             CompositionPlayer.this.renderedFirstFrame = true;
+            handleFrameRendered();
             invalidateState();
           });
     }
@@ -2420,10 +2473,12 @@ public final class CompositionPlayer extends SimpleBasePlayer {
     @Override
     public void onFrameAboutToBeRendered(
         long presentationTimeUs, long releaseTimeNs, Format format) {
+      Log.d(TAG, "onFrameAboutToBeRendered: timeUs=" + presentationTimeUs);
       if (packetConsumer != null) {
         VideoSize videoSizeToBeRendered = new VideoSize(format.width, format.height);
         applicationHandler.post(
             () -> {
+              handleFrameRendered();
               if (!Objects.equals(videoSize, videoSizeToBeRendered)) {
                 if (videoSize == null) {
                   renderedFirstFrame = true;

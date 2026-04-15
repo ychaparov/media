@@ -23,6 +23,7 @@ import static com.google.common.util.concurrent.MoreExecutors.newDirectExecutorS
 import androidx.annotation.Nullable;
 import androidx.media3.common.util.Consumer;
 import androidx.media3.common.util.ExperimentalApi;
+import androidx.media3.common.util.Log;
 import androidx.media3.common.util.SystemClock;
 import androidx.media3.effect.GlTextureFrame;
 import androidx.media3.effect.HardwareBufferFrame;
@@ -43,10 +44,12 @@ import java.util.concurrent.ConcurrentLinkedDeque;
 @ExperimentalApi // TODO: b/449956776 - Remove once FrameConsumer API is finalized.
 /* package */ class CompositionVideoPacketReleaseControl implements CompositionRendererListener {
 
+  private static final String TAG = "CompVidPacketRelCtrl";
   private final VideoFrameReleaseControl videoFrameReleaseControl;
   private final PacketConsumerCaller<ImmutableList<HardwareBufferFrame>> downstreamConsumer;
   private final ConcurrentLinkedDeque<ImmutableList<HardwareBufferFrame>> packetQueue;
   private final VideoFrameReleaseControl.FrameReleaseInfo videoFrameReleaseInfo;
+  private @Nullable CompositionPlayerInternal internalPlayer;
   private volatile boolean isEnded;
 
   /**
@@ -72,6 +75,17 @@ import java.util.concurrent.ConcurrentLinkedDeque;
   }
 
   /**
+   * Sets the {@link CompositionPlayerInternal} to be notified of rendering events.
+   *
+   * <p>This method is called once the {@link CompositionPlayerInternal} has been created.
+   *
+   * @param internalPlayer The {@link CompositionPlayerInternal}.
+   */
+  public void setInternalPlayer(CompositionPlayerInternal internalPlayer) {
+    this.internalPlayer = internalPlayer;
+  }
+
+  /**
    * Queues a {@linkplain List<HardwareBufferFrame> packet}.
    *
    * <p>Once called, the caller must not modify the {@link HardwareBufferFrame}s in the packet.
@@ -82,6 +96,7 @@ import java.util.concurrent.ConcurrentLinkedDeque;
    */
   public void queue(List<HardwareBufferFrame> packet) {
     checkArgument(!packet.isEmpty());
+    Log.d(TAG, "queue: timeUs=" + packet.get(0).sequencePresentationTimeUs);
     if (!packet.get(0).equals(HardwareBufferFrame.END_OF_STREAM_FRAME)) {
       // The VideoFrameReleaseControl cannot currently handle a packet being queued in the past,
       // manually release all frames to handle this discontinuity.
@@ -139,9 +154,11 @@ import java.util.concurrent.ConcurrentLinkedDeque;
               /* isLastFrame= */ false,
               videoFrameReleaseInfo);
       if (!maybeQueuePacketDownstream(frameReleaseAction, packet)) {
+        Log.d(TAG, "onRender: action=" + frameReleaseAction + ", timeUs=" + presentationTimeUs + " - HELD");
         packetQueue.addFirst(packet);
         return;
       }
+      Log.d(TAG, "onRender: action=" + frameReleaseAction + ", timeUs=" + presentationTimeUs + " - PROCESSED");
       videoFrameReleaseControl.onFrameReleasedIsFirstFrame();
     }
   }
@@ -154,6 +171,7 @@ import java.util.concurrent.ConcurrentLinkedDeque;
       return;
     }
     videoFrameReleaseControl.onStreamChanged(firstFrameReleaseInstruction);
+    videoFrameReleaseControl.allowReleaseFirstFrameBeforeStarted();
   }
 
   /**
@@ -164,6 +182,7 @@ import java.util.concurrent.ConcurrentLinkedDeque;
    * <p>Called on the playback thread.
    */
   public void flush(int sequenceIndex) {
+    Log.d(TAG, "flush: seq=" + sequenceIndex);
     // Only reset when the primary sequence is flushed.
     if (sequenceIndex == 0) {
       reset();
@@ -203,6 +222,7 @@ import java.util.concurrent.ConcurrentLinkedDeque;
       releasePacket(packet);
     }
     videoFrameReleaseControl.reset();
+    videoFrameReleaseControl.allowReleaseFirstFrameBeforeStarted();
     isEnded = false;
   }
 
@@ -224,6 +244,9 @@ import java.util.concurrent.ConcurrentLinkedDeque;
         return false;
       case VideoFrameReleaseControl.FRAME_RELEASE_DROP:
         releasePacket(packet);
+        if (internalPlayer != null) {
+          internalPlayer.onVideoFrameAboutToBeRendered();
+        }
         return true;
       case VideoFrameReleaseControl.FRAME_RELEASE_IMMEDIATELY:
         return setReleaseTimeAndQueueDownstream(
@@ -259,7 +282,11 @@ import java.util.concurrent.ConcurrentLinkedDeque;
     for (int i = 0; i < packet.size(); i++) {
       framesWithReleaseTimeBuilder.add(updateReleaseTime(packet.get(i), releaseTimeNs));
     }
-    return downstreamConsumer.tryQueuePacket(Packet.of(framesWithReleaseTimeBuilder.build()));
+    boolean queued = downstreamConsumer.tryQueuePacket(Packet.of(framesWithReleaseTimeBuilder.build()));
+    if (queued && internalPlayer != null) {
+      internalPlayer.onVideoFrameAboutToBeRendered();
+    }
+    return queued;
   }
 
   private static HardwareBufferFrame updateReleaseTime(

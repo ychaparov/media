@@ -22,6 +22,7 @@ import static com.google.common.base.Preconditions.checkState;
 
 import androidx.annotation.Nullable;
 import androidx.media3.common.util.Consumer;
+import androidx.media3.common.util.Log;
 import androidx.media3.effect.HardwareBufferFrame;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayDeque;
@@ -34,6 +35,7 @@ import java.util.Queue;
  * ImmutableList<HardwareBufferFrame>}.
  */
 /* package */ class FrameAggregator {
+  private static final String TAG = "FrameAggregator";
   private final Consumer<ImmutableList<HardwareBufferFrame>> downstreamConsumer;
   private final Consumer<Integer> onFlush;
   private final List<FrameQueue> inputFrameQueues;
@@ -67,6 +69,7 @@ import java.util.Queue;
    * <p>All sequences must be registered before frames are queued.
    */
   public void registerSequence(int sequenceIndex, boolean shouldAggregate) {
+    Log.d(TAG, "registerSequence: " + sequenceIndex + ", shouldAggregate: " + shouldAggregate);
     checkArgument(sequenceIndex >= 0);
     checkArgument(sequenceIndex < numSequences);
     inputFrameQueues.get(sequenceIndex).initialize(shouldAggregate);
@@ -85,6 +88,7 @@ import java.util.Queue;
    *     equal to {@link #numSequences}.
    */
   public void queueFrame(HardwareBufferFrame frame, int sequenceIndex) {
+    Log.d(TAG, "queueFrame: seq=" + sequenceIndex + ", timeUs=" + frame.sequencePresentationTimeUs);
     checkArgument(sequenceIndex >= 0);
     checkArgument(sequenceIndex < numSequences);
     checkState(inputFrameQueues.get(sequenceIndex).isRegistered);
@@ -107,6 +111,7 @@ import java.util.Queue;
    *     equal to {@link #numSequences}.
    */
   public void queueEndOfStream(int sequenceIndex) {
+    Log.d(TAG, "queueEndOfStream: seq=" + sequenceIndex);
     checkArgument(sequenceIndex >= 0);
     checkArgument(sequenceIndex < numSequences);
     checkState(inputFrameQueues.get(sequenceIndex).isRegistered);
@@ -137,6 +142,7 @@ import java.util.Queue;
    *     equal to {@link #numSequences}.
    */
   public void flush(int sequenceIndex) {
+    Log.d(TAG, "flush: seq=" + sequenceIndex);
     checkArgument(sequenceIndex >= 0);
     checkArgument(sequenceIndex < numSequences);
     checkState(inputFrameQueues.get(sequenceIndex).isRegistered);
@@ -168,9 +174,11 @@ import java.util.Queue;
 
       ImmutableList<HardwareBufferFrame> matches = findMatchingSecondaryFrames(nextPrimaryFrame);
       if (matches == null) {
+        Log.d(TAG, "maybeAggregate: waiting for secondary frames for primary timeUs=" + nextPrimaryFrame.sequencePresentationTimeUs);
         return;
       }
 
+      Log.d(TAG, "maybeAggregate: aggregated packet for primary timeUs=" + nextPrimaryFrame.sequencePresentationTimeUs);
       ImmutableList.Builder<HardwareBufferFrame> outputFramesBuilder =
           new ImmutableList.Builder<>();
       outputFramesBuilder.add(nextPrimaryFrame);

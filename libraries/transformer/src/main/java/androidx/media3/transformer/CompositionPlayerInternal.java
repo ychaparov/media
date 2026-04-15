@@ -61,6 +61,9 @@ import androidx.media3.exoplayer.video.PlaybackVideoGraphWrapper;
      *     drops occurred.
      */
     void onDroppedVideoFrames(int droppedFrameCount, long elapsedMs);
+
+    /** Called when a video frame is about to be rendered. */
+    void onVideoFrameAboutToBeRendered();
   }
 
   /** Timeout for {@link #release()}. */
@@ -202,6 +205,15 @@ import androidx.media3.exoplayer.video.PlaybackVideoGraphWrapper;
     if (droppedFrames >= MAX_DROPPED_VIDEO_FRAME_COUNT_TO_NOTIFY) {
       maybeNotifyDroppedFrames();
     }
+  }
+
+  /**
+   * Reports that a video frame is about to be rendered.
+   *
+   * <p>Must be called on the playback thread.
+   */
+  /* package */ void onVideoFrameAboutToBeRendered() {
+    listenerHandler.post(listener::onVideoFrameAboutToBeRendered);
   }
 
   private void maybeNotifyDroppedFrames() {
