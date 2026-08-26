@@ -325,6 +325,11 @@ import org.checkerframework.checker.nullness.qual.MonotonicNonNull;
     rendererWakeupListenerList.remove(rendererWakeupListener);
   }
 
+  /** Returns whether there are pending frames in this reader. */
+  synchronized boolean hasPendingFrames() {
+    return !pendingFrameInfo.isEmpty();
+  }
+
   /** Clears all pending frames. */
   void flush() {
     synchronized (this) {

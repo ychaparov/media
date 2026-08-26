@@ -124,7 +124,6 @@ import androidx.media3.extractor.DefaultExtractorsFactory;
 import androidx.media3.extractor.amr.AmrExtractor;
 import androidx.media3.extractor.ts.AdtsExtractor;
 import com.google.common.base.Supplier;
-import com.google.common.base.Suppliers;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
@@ -1195,17 +1194,15 @@ public final class CompositionPlayer extends SimpleBasePlayer {
         // TODO: b/449956936 - move packetConsumer playback thread seek handling to
         //  CompositionPlayerInternal.
         int sequenceIndex = i;
+        SequenceRenderersFactory sequenceRenderersFactory = playerHolders.get(i).renderersFactory;
         playerHolders
             .get(i)
             .player
             .createMessage(
                 (unused, message) -> {
-                  HardwareBufferFrameReader frameReader =
-                      (HardwareBufferFrameReader) checkNotNull(message);
-                  frameReader.flush();
+                  sequenceRenderersFactory.flushHardwareBufferFrameReaders();
                   checkNotNull(frameAggregator).flush(sequenceIndex);
                 })
-            .setPayload(playerHolders.get(i).hardwareBufferFrameReaderSupplier.get())
             .send();
       }
     }
@@ -1659,33 +1656,32 @@ public final class CompositionPlayer extends SimpleBasePlayer {
       // HardwareBufferFrameReader.
       final FrameAggregator currentFrameAggregator = frameAggregator;
       hardwareBufferFrameReaderSupplier =
-          Suppliers.memoize(
-              () ->
-                  new HardwareBufferFrameReader(
-                      composition,
-                      sequenceIndex,
-                      /* frameConsumer= */ hardwareBufferFrame -> {
-                        if (hardwareBufferFrame == HardwareBufferFrame.END_OF_STREAM_FRAME) {
-                          checkNotNull(currentFrameAggregator).queueEndOfStream(sequenceIndex);
-                        } else if (hardwareBufferPostProcessor != null) {
-                          HardwareBufferFrame processedFrame =
-                              hardwareBufferPostProcessor.process(hardwareBufferFrame);
-                          checkNotNull(currentFrameAggregator)
-                              .queueFrame(processedFrame, sequenceIndex);
-                        } else {
-                          checkNotNull(currentFrameAggregator)
-                              .queueFrame(hardwareBufferFrame, sequenceIndex);
-                        }
-                      },
-                      checkNotNull(playbackThread).getLooper(),
-                      /* defaultSurfacePixelFormat= */ ImageFormat.PRIVATE,
-                      imageReaderAdapterFactory,
-                      e ->
-                          maybeUpdatePlaybackError(
-                              "HardwareBufferFrameReader error",
-                              e,
-                              PlaybackException.ERROR_CODE_UNSPECIFIED),
-                      compositionInternalListenerHandler));
+          () ->
+              new HardwareBufferFrameReader(
+                  composition,
+                  sequenceIndex,
+                  /* frameConsumer= */ hardwareBufferFrame -> {
+                    if (hardwareBufferFrame == HardwareBufferFrame.END_OF_STREAM_FRAME) {
+                      checkNotNull(currentFrameAggregator).queueEndOfStream(sequenceIndex);
+                    } else if (hardwareBufferPostProcessor != null) {
+                      HardwareBufferFrame processedFrame =
+                          hardwareBufferPostProcessor.process(hardwareBufferFrame);
+                      checkNotNull(currentFrameAggregator)
+                          .queueFrame(processedFrame, sequenceIndex);
+                    } else {
+                      checkNotNull(currentFrameAggregator)
+                          .queueFrame(hardwareBufferFrame, sequenceIndex);
+                    }
+                  },
+                  checkNotNull(playbackThread).getLooper(),
+                  /* defaultSurfacePixelFormat= */ ImageFormat.PRIVATE,
+                  imageReaderAdapterFactory,
+                  e ->
+                      maybeUpdatePlaybackError(
+                          "HardwareBufferFrameReader error",
+                          e,
+                          PlaybackException.ERROR_CODE_UNSPECIFIED),
+                  compositionInternalListenerHandler);
       renderersFactory =
           SequenceRenderersFactory.createForHardwareBuffer(
               context,
@@ -1717,9 +1713,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
             checkNotNull(playbackThread).getLooper(),
             clock,
             renderersFactory,
-            /* inputIndex= */ sequenceIndex,
-            hardwareBufferFrameReaderSupplier,
-            /* shouldReleaseHardwareBufferFrameReader= */ sequenceContainsVideo);
+            /* inputIndex= */ sequenceIndex);
     playerHolder.player.addListener(new PlayerListener(sequenceIndex));
     playerHolder.player.addAnalyticsListener(new PlayerAnalyticsListener());
     playerHolder.player.addAnalyticsListener(new EventLogger(TAG + "-" + sequenceIndex));
@@ -1730,10 +1724,6 @@ public final class CompositionPlayer extends SimpleBasePlayer {
     playerHolder.player.setAudioAttributes(audioAttributes, /* handleAudioFocus= */ false);
     playerHolder.player.setPauseAtEndOfMediaItems(true);
     playerHolder.renderersFactory.setRequestMediaCodecToneMapping(requestMediaCodecToneMapping);
-    if (frameProcessor != null && sequenceContainsVideo) {
-      playerHolder.player.setVideoSurface(
-          checkNotNull(hardwareBufferFrameReaderSupplier.get()).getSurface());
-    }
     return playerHolder;
   }
 
@@ -2350,8 +2340,6 @@ public final class CompositionPlayer extends SimpleBasePlayer {
     public final ExoPlayer player;
     public final SequenceRenderersFactory renderersFactory;
     public final CompositionTrackSelector trackSelector;
-    final Supplier<@NullableType HardwareBufferFrameReader> hardwareBufferFrameReaderSupplier;
-    final boolean shouldReleaseHardwareBufferFrameReader;
 
     private SequencePlayerHolder(
         Context context,
@@ -2359,9 +2347,7 @@ public final class CompositionPlayer extends SimpleBasePlayer {
         Looper playbackLooper,
         Clock clock,
         SequenceRenderersFactory renderersFactory,
-        int inputIndex,
-        Supplier<@NullableType HardwareBufferFrameReader> hardwareBufferFrameReaderSupplier,
-        boolean shouldReleaseHardwareBufferFrameReader) {
+        int inputIndex) {
       trackSelector =
           new CompositionTrackSelector(
               context,
@@ -2385,17 +2371,10 @@ public final class CompositionPlayer extends SimpleBasePlayer {
               .setStuckSuppressedDetectionTimeoutMs(Integer.MAX_VALUE);
       player = playerBuilder.build();
       this.renderersFactory = renderersFactory;
-      this.hardwareBufferFrameReaderSupplier = hardwareBufferFrameReaderSupplier;
-      this.shouldReleaseHardwareBufferFrameReader = shouldReleaseHardwareBufferFrameReader;
     }
 
     private void release() {
       player.release();
-      HardwareBufferFrameReader reader = hardwareBufferFrameReaderSupplier.get();
-      // TODO: b/518679527 - Move hardwareBufferFrameReader release to video renderers.
-      if (shouldReleaseHardwareBufferFrameReader && reader != null) {
-        reader.release();
-      }
     }
   }
 
